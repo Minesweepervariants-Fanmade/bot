@@ -1,23 +1,13 @@
-import socket
 from pathlib import Path
+
+import jmcomic as jm
 
 SELF_PATH = Path(__file__).parent.__str__()
 
+jmoption = jm.JmOption.construct({"dir_rule": {"base_dir": f"{SELF_PATH}\\download", "rule": "Bd_Pid"}})
+jmoption.plugins["after_photo"] = [{"plugin": "img2pdf", "kwargs":{"pdf_dir": f"{SELF_PATH}\\download", "filename_rule": "Pid"}}]
 
-def get_host_ip():
-    """
-    查询本机ip地址
-    :return: ip
-    """
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('10.147.19.0', 80))
-        ip = s.getsockname()[0]
-    finally:
-        s.close()
-
-    return ip
 
 if __name__ == '__main__':
-    print(get_host_ip())
-    print(SELF_PATH)
+    jm.download_album("11451", option=jmoption)
+    print(jmoption)
