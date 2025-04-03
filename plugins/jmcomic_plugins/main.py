@@ -13,6 +13,7 @@ from ncatbot.core.api import check_and_log
 import jmcomic as jm
 from jmcomic.jm_exception import MissingAlbumPhotoException
 
+
 def get_host_ip():
     """
     查询本机ip地址
@@ -37,7 +38,15 @@ bot = CompatibleEnrollment
 download_json_path = f"{SELF_PATH}\\cache\\download.json"
 
 jmoption = jm.JmOption.construct({"dir_rule": {"base_dir": f"{SELF_PATH}\\cache", "rule": "Bd_Pid"}})
-jmoption.plugins["after_photo"] = [{"plugin": "img2pdf", "kwargs":{"pdf_dir": f"{SELF_PATH}\\cache", "filename_rule": "Pid"}}]
+jmoption.plugins["after_photo"] = [
+    {
+        "plugin": "img2pdf",
+        "kwargs": {
+            "pdf_dir": f"{SELF_PATH}\\cache",
+            "filename_rule": "Pid"
+        }
+    }
+]
 
 
 class JmComicPlugin(BasePlugin):
@@ -61,8 +70,8 @@ class JmComicPlugin(BasePlugin):
             shutil.rmtree(f"{SELF_PATH}\\cache\\{_jmid}")
             os.remove(f"{SELF_PATH}\\cache\\{_jmid}.pdf")
 
-        try:
-            async with lock:
+        async with lock:
+            try:
                 print("download start")
                 if isinstance(msg, GroupMessage):
                     await self.api.post_group_msg(msg.group_id, f"开始下载{jmid}")
@@ -76,7 +85,7 @@ class JmComicPlugin(BasePlugin):
                     elif isinstance(msg, PrivateMessage):
                         await self.api.post_private_msg(msg.user_id, f"未找到{jmid}")
                     return
-                file_url = f"http://{HOST_IP}/{SELF_PATH}\\cache\\{jmid}.pdf"
+                file_url = f"http://{HOST_IP}\\{SELF_PATH}\\cache\\{jmid}.pdf"
                 print("start send pdf")
                 await self.post_file(file_url, f"{jmid}.pdf", msg)
                 print("end send pdf")
@@ -120,13 +129,11 @@ class JmComicPlugin(BasePlugin):
                 with open(download_json_path, "w", encoding="utf-8") as f:
                     json.dump(history_download, f, indent=4)
                 print("done")
-        except Exception as e:
-            _log.error(e)
-
+            except Exception as e:
+                _log.error(e)
 
     @bot.group_event()
     async def on_group_event(self, msg: GroupMessage):
-        print("jm", msg)
         if msg.raw_message.startswith("#jm"):
             command = msg.raw_message.split(" ")[1:]
             for jmid in command:
@@ -134,7 +141,6 @@ class JmComicPlugin(BasePlugin):
 
     @bot.private_event()
     async def on_private_event(self, msg: GroupMessage):
-        print("jm", msg)
         if msg.raw_message.startswith("#jm"):
             command = msg.raw_message.split(" ")[1:]
             for jmid in command:

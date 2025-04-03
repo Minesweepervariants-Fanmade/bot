@@ -18,10 +18,5 @@ class Test(BasePlugin):
     @bot.group_event()
     async def on_group_event(self, msg: GroupMessage):
         # 定义的回调函数
-        print("test", msg)
         if msg.raw_message == "测试":
             await self.api.post_group_msg(msg.group_id, text="Ncatbot 插件测试成功喵")
-
-    @bot.private_event()
-    async def on_private_event(self, msg: PrivateMessage):
-        print("test", msg)
