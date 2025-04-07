@@ -5,7 +5,7 @@ import base64
 from .chess_main.mines_chess import MVChess, find_rule
 
 from ncatbot.plugin import BasePlugin, CompatibleEnrollment
-from ncatbot.core.message import GroupMessage, PrivateMessage
+from ncatbot.core.message import GroupMessage
 from ncatbot.utils.logger import get_log
 
 
