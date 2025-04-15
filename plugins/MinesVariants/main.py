@@ -1,10 +1,9 @@
 from pathlib import Path
 import yaml
 
-if __name__ == "__import__":
-    from ncatbot.plugin import BasePlugin, CompatibleEnrollment
-    from ncatbot.core.message import GroupMessage
-    from ncatbot.utils import logger
+from ncatbot.plugin import BasePlugin, CompatibleEnrollment
+from ncatbot.core.message import GroupMessage
+from ncatbot.utils import logger
 
 try:
     import ollama
@@ -19,43 +18,23 @@ SELF_PATH = Path(__file__).parent.__str__()
 _log = logger.get_log()
 bot = CompatibleEnrollment
 download_json_path = f"{SELF_PATH}\\cache\\download.json"
-config_data = yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding="utf-8"))
+config_data: dict = yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding="utf-8"))
+config_data.update({"model": yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding="utf-8"))})
 
 
 async def rule_create(descri: str, post):
-    def post_ollama(message=None, content="", assistant="") -> ChatResponse:
+    def post_ollama(model="quickout", message=None, content="") -> ChatResponse:
         if message is None:
             message = [
-                {"role": "assistant", "content": assistant},
                 {"role": "user", "content": content}
             ]
-        return chat(model=config_data["model"], messages=message)
-    await post("")
+        return chat(model=config_data["model"][model], messages=message)
     response: ChatResponse = post_ollama(
-        assistant="\n".join(config_data["params"]["check"]),
-        content=descri
+        content="\n".join(config_data["params"]["check"]) + "{" + descri + "}",
     )
     print(response.message.content)
     data = eval(response.message.content.rsplit("\"", 2)[1])
     print("rule check:", data)
-    if not data:
-        await post("未描述规则,请检查并重新键入")
-        return
-    else:
-        await post("已通过规则检查")
-    response: ChatResponse = post_ollama(
-        assistant="\n".join(config_data["params"]["init_examp"]),
-        content=descri
-    )
-    print(response.message.content)
-    data = eval(response.message.content.rsplit("\"", 2)[1])
-    print("data:", data)
-    if not data:
-        await post("请给出规则的示例内容")
-        return
-    else:
-        await post("已获取到示例信息")
-
 
 
 class MinesVariants(BasePlugin):
@@ -75,11 +54,15 @@ class MinesVariants(BasePlugin):
                         return
                 return rule_create(descri=command[1], post=post)
 
+
 def main():
     # ollama.chat
     print(config_data)
     descri = """
-    123
+对于一个线索来说 该线索将表示周围八个格子的雷数量总和 F为雷 ?为非雷 例: 
+? ? ?
+F 3 ?
+F ? F 其中线索3是正确的
     """
     rule_create(descri, print)
 
