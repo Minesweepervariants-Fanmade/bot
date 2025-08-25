@@ -9,6 +9,7 @@ import yaml
 from ncatbot.core.api import check_and_log
 
 from ncatbot.plugin import BasePlugin, CompatibleEnrollment
+from ncatbot.core.message import GroupMessage
 from ncatbot.utils import logger
 
 
@@ -34,7 +35,7 @@ bot = CompatibleEnrollment
 config_data: dict = yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding="utf-8"))
 
 request_map = {}
-request_id = 1697
+request_id = 1616
 HOST_IP = get_host_ip()
 
 
