@@ -70,6 +70,7 @@ class JmComicPlugin(BasePlugin):
             shutil.rmtree(f"{SELF_PATH}\\cache\\{_jmid}")
             os.remove(f"{SELF_PATH}\\cache\\{_jmid}.pdf")
 
+
         async with lock:
             try:
                 print("download start")
@@ -145,3 +146,4 @@ class JmComicPlugin(BasePlugin):
             command = msg.raw_message.split(" ")[1:]
             for jmid in command:
                 await self.download(msg, jmid)
+
