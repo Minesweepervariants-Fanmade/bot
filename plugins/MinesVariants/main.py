@@ -1,4 +1,5 @@
 import asyncio
+import pathlib
 import time
 from pathlib import Path
 import socket
@@ -9,7 +10,7 @@ import yaml
 from ncatbot.core.api import check_and_log
 
 from ncatbot.plugin import BasePlugin, CompatibleEnrollment
-from ncatbot.core.message import GroupMessage
+from ncatbot.core.message import GroupMessage, PrivateMessage
 from ncatbot.utils import logger
 
 
@@ -35,7 +36,6 @@ bot = CompatibleEnrollment
 config_data: dict = yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding="utf-8"))
 
 request_map = {}
-request_id = 1616
 HOST_IP = get_host_ip()
 
 
@@ -181,19 +181,61 @@ class MinesVariants(BasePlugin):
     name = "MinesVariants"
     version = "0.0.0"
 
+    @bot.private_event()
+    async def on_private_event(self, msg: PrivateMessage):
+        command: list[str] = msg.raw_message.split()
+        match command[0]:
+            case "#生成":
+                self.data["id"] += 1
+                request_map[self.data["id"]] = Request(max_length=50, _request_id=self.data["id"])
+                request_map[self.data["id"]].nickname = msg.sender.nickname
+                threading.Thread(target=self.thread_target,
+                                 args=(msg, command[:], request_map[self.data["id"]])).start()
+                time.sleep(1)
+                if self.data["id"] in request_map:
+                    await self.api.post_private_msg(msg.user_id,
+                                                    f"已创建进程 id:{self.data["id"]} 可使用\"#查询 {self.data["id"]}\"")
+            case "#所有规则":
+                await self.rule_list(msg)
+            case "#规则列表":
+                await self.rule_list(msg)
+            case "#查询规则":
+                await self.search_rule(command, msg)
+            case "#查询":
+                await self.query_thread(command, msg)
+            case "#cx":
+                await self.query_thread(command, msg)
+            case "#帮助":
+                HELP_TEXT = yaml.full_load(open(f"{SELF_PATH}/help.yaml", "r", encoding="utf-8"))
+                await self.send_group_forward_msg_text(HELP_TEXT, msg)
+            case "#help":
+                HELP_TEXT = yaml.full_load(open(f"{SELF_PATH}/help.yaml", "r", encoding="utf-8"))
+                await self.send_group_forward_msg_text(HELP_TEXT, msg)
+            case "#状态":
+                await self.state(msg)
+            case "#state":
+                await self.state(msg)
+            case "#终止":
+                await self.kill_thread(command, msg)
+            case "#kill":
+                await self.kill_thread(command, msg)
+            case "#test":
+                await self.rule_list(msg)
+
     @bot.group_event()
     async def on_group_event(self, msg: GroupMessage):
         command: list[str] = msg.raw_message.split(" ")
         match command[0]:
             case "#生成":
-                global request_id
-                request_id += 1
-                request_map[request_id] = Request(max_length=50, _request_id=request_id)
-                request_map[request_id].nickname = msg.sender.nickname
-                threading.Thread(target=self.thread_target, args=(msg, command[:], request_map[request_id])).start()
+                self.data["id"] += 1
+                request_map[self.data["id"]] = Request(max_length=50, _request_id=self.data["id"])
+                request_map[self.data["id"]].nickname = msg.sender.nickname
+                threading.Thread(target=self.thread_target,
+                                 args=(msg, command[:], request_map[self.data["id"]])).start()
                 time.sleep(0.5)
-                if request_id in request_map:
-                    await self.api.post_group_msg(msg.group_id, f"已创建进程 id:{request_id} 可使用\"#查询 {request_id}\"")
+                if self.data["id"] in request_map:
+                    await self.api.post_group_msg(msg.group_id,
+                                                  f"已创建进程 id:{self.data["id"]} 可使用\"#查询 {self.data["id"]}\"")
             case "#所有规则":
                 await self.rule_list(msg)
             case "#规则列表":
@@ -224,7 +266,10 @@ class MinesVariants(BasePlugin):
     async def search_rule(self, command, msg):
         map_data = yaml.full_load(open(f"{SELF_PATH}/map.yaml", "r", encoding="utf-8"))
         if len(command) == 1:
-            await self.api.post_group_msg(msg.group_id, "请输入规则名或者规则描述")
+            if hasattr(msg, "group_id"):
+                await self.api.post_group_msg(msg.group_id, "请输入规则名或者规则描述")
+            else:
+                await self.api.post_private_msg(msg.user_id, "请输入规则名或者规则描述")
             return
         args = command[1]
         all_rule = [rule for rules in self.all_rule() for rule in rules]
@@ -233,13 +278,19 @@ class MinesVariants(BasePlugin):
                 if type(map_data[args.upper()]) is list:
                     result = args.upper() + "包含以下规则:\n["
                     result += "], [".join(map_data[args]) + "]"
-                    await self.api.post_group_msg(msg.group_id, result)
+                    if hasattr(msg, "group_id"):
+                        await self.api.post_group_msg(msg.group_id, result)
+                    else:
+                        await self.api.post_private_msg(msg.user_id, result)
                     return
                 if type(map_data[args.upper()]) is str:
                     args = map_data[args.upper()]
             for rule in all_rule:
                 if f"[{args.upper()}]" in rule:
-                    await self.api.post_group_msg(msg.group_id, rule)
+                    if hasattr(msg, "group_id"):
+                        await self.api.post_group_msg(msg.group_id, rule)
+                    else:
+                        await self.api.post_private_msg(msg.user_id, rule)
                     return
         result = []
         for rule in all_rule:
@@ -269,7 +320,7 @@ class MinesVariants(BasePlugin):
         output = bytes.fromhex(output)
         output = output.decode("utf-8").replace("\r", "")
         split_symbol, output = output[:50], output[50:]
-        output = output.split(split_symbol*2)[:-1]
+        output = output.split(split_symbol * 2)[:-1]
         rules_list: list[list] = []
         for i in range(len(output)):
             rules: list[str] = output[i].split(split_symbol)
@@ -277,7 +328,43 @@ class MinesVariants(BasePlugin):
             rules_list.append(rules)
         return rules_list
 
-    async def send_group_forward_msg_text(self, text, msg, news=None, source=None, summary=None):
+    async def send_private_forward_msg_text(self, text, msg: PrivateMessage, news=None, source=None, summary=None):
+        def pck(content, user_id="2947571390", nickname="老婆") -> list:
+            if type(content) is str:
+                content = [{"type": "text", "data": {"text": content}}]
+                _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": content}}
+                return [_message]
+            elif type(content) is list:
+                _message = []
+                for _text in content:
+                    _text = pck(_text)
+                    _message.extend(_text)
+                _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": _message}}
+                return [_message]
+            elif type(content) is dict:
+                uid = content.get("uid", "2947571390")
+                name = content.get("name", "老婆")
+                content = content["content"]
+                return pck(content, user_id=uid, nickname=name)
+            else:
+                return []
+
+        if type(text) is str:
+            text = [text]
+        message = pck(text)
+        message = message[0]["data"]["content"]
+        if not message:
+            return
+        params = {"user_id": msg.user_id, "message": message}
+        if news is not None:
+            params["news"] = news
+        if source is not None:
+            params["source"] = source
+        if summary is not None:
+            params["summary"] = summary
+        return check_and_log(await self.api._http.post("/send_private_forward_msg", json=params))
+
+    async def send_group_forward_msg_text(self, text, msg: GroupMessage, news=None, source=None, summary=None):
         def pck(content, user_id="2947571390", nickname="老婆") -> list:
             if type(content) is str:
                 content = [{"type": "text", "data": {"text": content}}]
@@ -313,12 +400,19 @@ class MinesVariants(BasePlugin):
             params["summary"] = summary
         return check_and_log(await self.api._http.post("/send_group_forward_msg", json=params))
 
-    async def send_group_forward_msg_image(self, path, msg):
+    async def send_group_forward_msg_image(self, path, msg: GroupMessage):
         path = f"http://{HOST_IP}\\" + path
         content = [{"type": "image", "data": {"file": path, "summary": "[答案]"}}]
         message = [{"type": "node", "data": {"user_id": "2947571390", "nickname": "老婆", "content": content}}]
         params = {"group_id": msg.group_id, "message": message, "new": [{"text": "string"}]}
         return check_and_log(await self.api._http.post("/send_group_forward_msg", json=params))
+
+    async def send_private_forward_msg_image(self, path, msg: PrivateMessage):
+        path = f"http://{HOST_IP}\\" + path
+        content = [{"type": "image", "data": {"file": path, "summary": "[答案]"}}]
+        message = [{"type": "node", "data": {"user_id": "2947571390", "nickname": "老婆", "content": content}}]
+        params = {"user_id": msg.user_id, "message": message, "new": [{"text": "string"}]}
+        return check_and_log(await self.api._http.post("/send_private_forward_msg", json=params))
 
     async def state(self, msg):
         result = f"目前共{len(request_map.keys())}个进程正在运行"
@@ -327,22 +421,37 @@ class MinesVariants(BasePlugin):
             result += f"\n{request_map[key].data}"
             result += f"\n调用用户:{request_map[key].nickname}"
         if len(request_map.keys()) > 7:
-            await self.send_group_forward_msg_text(result, msg)
+            if hasattr(msg, "group_id"):
+                await self.send_group_forward_msg_text(result, msg)
+            else:
+                await self.send_private_forward_msg_text(result, msg)
         else:
-            await self.api.post_group_msg(msg.group_id, result)
+            if hasattr(msg, "group_id"):
+                await self.api.post_group_msg(msg.group_id, result)
+            else:
+                await self.api.post_private_msg(msg.user_id, result)
 
     async def kill_thread(self, command, msg):
         if not command[1].isdigit():
-            await self.api.post_group_msg(msg.group_id, "请输入进程id查询")
+            if hasattr(msg, "group_id"):
+                await self.api.post_group_msg(msg.group_id, "请输入进程id查询")
+            else:
+                await self.api.post_private_msg(msg.user_id, "请输入进程id查询")
             return
         query_id = int(command[1])
         if query_id not in request_map:
-            await self.api.post_group_msg(msg.group_id, "进程id不在运行")
+            if hasattr(msg, "group_id"):
+                await self.api.post_group_msg(msg.group_id, "进程id不在运行")
+            else:
+                await self.api.post_private_msg(msg.user_id, "进程id不在运行")
             return
         request = request_map[query_id]
         request.close_connection()
         del request_map[query_id]
-        await self.api.post_group_msg(msg.group_id, "已终止进程")
+        if hasattr(msg, "group_id"):
+            await self.api.post_group_msg(msg.group_id, "已终止进程")
+        else:
+            await self.api.post_private_msg(msg.user_id, "已终止进程")
 
     async def query_thread(self, command, msg):
         forcibly = "/f" in command
@@ -392,11 +501,13 @@ class MinesVariants(BasePlugin):
         except:
             map_data = {}
         if len(command) < 2:
-            await self.api.post_group_msg(msg.group_id, "请输入尺寸和规则, 例\"#生成 5 V\", 详情参阅\"#帮助\"", reply=msg.message_id)
+            await self.api.post_group_msg(msg.group_id, "请输入尺寸和规则, 例\"#生成 5 V\", 详情参阅\"#帮助\"",
+                                          reply=msg.message_id)
             del request_map[request.request_id]
             return
         if not command[1].isdigit():
-            await self.api.post_group_msg(msg.group_id, "请将题板尺寸放置在第一个参数处, 例\"#生成 5 V\"", reply=msg.message_id)
+            await self.api.post_group_msg(msg.group_id, "请将题板尺寸放置在第一个参数处, 例\"#生成 5 V\"",
+                                          reply=msg.message_id)
             del request_map[request.request_id]
             return
         size = [command[1]]
@@ -448,6 +559,7 @@ class MinesVariants(BasePlugin):
         args += " ".join(size)
         args += " -c "
         args += " ".join(rules)
+        args += " --file-name " + str(request.request_id)
         state = 1
         result = ""
         for _ in range(1):
@@ -473,8 +585,20 @@ class MinesVariants(BasePlugin):
             request_map[request.request_id] = _request
 
         if state == 0:
-            await self.api.post_group_file(msg.group_id, image=config_data["out_path"] + "\\demo.png")
-            await self.send_group_forward_msg_image(path=config_data["out_path"] + "\\answer.png", msg=msg)
+            await self.api.post_group_file(
+                msg.group_id,
+                image=(config_data["out_path"] + "\\" +
+                       str(request.request_id) + "demo.png")
+            )
+            await self.send_group_forward_msg_image(
+                path=(config_data["out_path"] + "\\" +
+                      str(request.request_id) + "answer.png"),
+                msg=msg
+            )
+            pathlib.Path.unlink((config_data["out_path"] + "\\" +
+                                 str(request.request_id) + "answer.png"))
+            pathlib.Path.unlink((config_data["out_path"] + "\\" +
+                                 str(request.request_id) + "demo.png"))
             await self.api.post_group_msg(reply=msg.message_id, text="生成完成", group_id=msg.group_id)
         if state == 1:
             await self.api.post_group_msg(msg.group_id, f"进程[{request.request_id}]生成失败", reply=msg.message_id)
@@ -484,7 +608,6 @@ class MinesVariants(BasePlugin):
             await self.api.post_group_msg(msg.group_id, f"未知的规则[{rule_name}]", reply=msg.message_id)
 
         del request_map[request.request_id]
-
 
 # if __name__ == '__main__':
 #     request = Request()
