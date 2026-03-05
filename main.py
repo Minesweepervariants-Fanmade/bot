@@ -1,3 +1,6 @@
+import socket
+import threading
+
 import yaml
 from ncatbot.core import BotClient
 from ncatbot.utils.config import config
@@ -12,5 +15,24 @@ config.set_token(botData["token"])  # 设置 token (napcat 服务器的 token)
 
 bot = BotClient()
 
+
+def server_listen():
+    port = 31409
+    host = "0.0.0.0"
+    """启动一个同步TCP服务，接收连接并回复状态"""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((host, port))
+    server.listen(5)
+    print(f"事件总线监听于 {host}:{port}")
+
+    while True:
+        client, addr = server.accept()
+        client.sendall(b'EventBus OK\n')  # 收到连接即回复
+        client.close()
+
+
 if __name__ == "__main__":
+    thread = threading.Thread(target=server_listen)
+    thread.daemon = True
+    thread.start()
     bot.run()
