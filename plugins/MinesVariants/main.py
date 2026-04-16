@@ -1,4 +1,5 @@
 import asyncio
+import os
 import pathlib
 import random
 import re
@@ -8,8 +9,10 @@ from pathlib import Path
 import socket
 import threading
 import datetime
+from typing import Union
 
 import regex
+import requests
 import yaml
 import base64
 from ncatbot.core.api import check_and_log
@@ -81,6 +84,7 @@ def response(*key: str) -> str:
 
 
 def update_all_rules():
+    global ALL_RULE
     output = ""
     for _ in range(5):
         request = Request()
@@ -100,7 +104,34 @@ def update_all_rules():
     with open(f"{SELF_PATH}/rule.tmp", 'wb') as f:
         f.write(bytes.fromhex(output))
     _log.info("发起更新规则列表")
+    ALL_RULE = []
     return True
+
+
+def get_system_stats(interval=0.2) -> str:
+    """获取系统 CPU 和内存占用，返回格式化字符串"""
+    import psutil
+    cpu_percent = psutil.cpu_percent(interval=interval)  # 1秒采样，避免瞬时波动
+    mem = psutil.virtual_memory()
+    return f"CPU: {cpu_percent}% | MEM: {mem.percent}% ({mem.used//(1024**2)}MB/{mem.total//(1024**2)}MB)"
+
+
+def safe_filename(s):
+    s = re.sub(r'[_\\/:*?"<>|]', lambda m: '__' if m.group() == '_' else f'_{ord(m.group()):02X}', s)
+    return s
+
+
+def get_rule_image(names: list[str]):
+    file_name = "_".join(names)
+    file_name = file_name.replace("-", "--")
+    file_name = file_name.replace('?', '-q')
+    file_name = file_name.replace('*', '-a')
+    file_name = file_name.replace('<', '-l')
+    file_name = file_name.replace('>', '-g')
+    file_name = file_name.replace('/', '-s')
+    file_name = file_name.replace('\\', '-b')
+    file_name = file_name.replace(':', '-c')
+    return config_data["image_path"] + "\\" + file_name + ".png"
 
 
 SELF_PATH = Path(__file__).parent.__str__()
@@ -111,6 +142,8 @@ config_data: dict = yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding=
 
 request_map = {}
 HOST_IP = get_host_ip()
+ALL_RULE = []   # {name: [], doc: "..."}, ...
+IMAGE_SPLIT = ''.join([chr(random.randint(33, 126)) for _ in range(50)])
 
 
 class Request:
@@ -259,9 +292,10 @@ class MinesVariants(BasePlugin):
     @bot.private_event()
     async def on_private_event(self, msg: PrivateMessage):
         try:
-            command: list[str] = msg.raw_message.split()
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()
             match command[0]:
-                case "#生成":
+                case "#生成" | "#sc" | "#summon" | "#run":
                     self.data["id"] += 1
                     request_map[self.data["id"]] = Request(max_length=50, _request_id=self.data["id"])
                     request_map[self.data["id"]].nickname = msg.sender.nickname
@@ -302,20 +336,24 @@ class MinesVariants(BasePlugin):
     async def on_group_event(self, msg: GroupMessage):
         print(msg.group_id, ":", msg.raw_message[:20].replace("\n", ""), end="\r")
         try:
-            command: list[str] = msg.raw_message.split()
-            if not msg.raw_message.startswith("#"):
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()
+            if not raw_message.startswith("#"):
                 return
+
+            # if command:
+            #     command[0] = command[0][1:]
             # if not msg.raw_message.startswith("#test"):
             #     return
             match command[0]:
-                case "#生成" | "#sc" | "#summon":
+                case "#生成" | "#sc" | "#summon" | "#run":
                     self.data["id"] += 1
                     self.data.save()
                     request_map[self.data["id"]] = Request(max_length=50, _request_id=self.data["id"])
                     request_map[self.data["id"]].nickname = msg.sender.nickname
                     threading.Thread(target=self.thread_target,
                                      args=(msg, command[:], request_map[self.data["id"]])).start()
-                    time.sleep(0.5)
+                    # time.sleep(1)
                     if self.data["id"] in request_map:
                         await self.api.post_group_msg(
                             msg.group_id, response("task", "created").format(self.data["id"])
@@ -328,7 +366,9 @@ class MinesVariants(BasePlugin):
                         await self.api.post_group_msg(msg.group_id, response("categories", "update_fail"))
                 case "#所有规则" | "#规则列表" | "#list" | "#ls":
                     await self.rule_list(msg)
-                case "#查询规则" | "#查询" | "#cx":
+                case "#查询规则" | "#cxr":
+                    await self.search_rule(msg)
+                case "#查询" | "#cx":
                     await self.query_thread(command, msg)
                 case "#帮助" | "#help" | "#?":
                     try:
@@ -343,7 +383,7 @@ class MinesVariants(BasePlugin):
                         await self.api.post_group_msg(msg.group_id, error_msg)
                 case "#状态" | "#state" | "##":
                     await self.state(msg)
-                case "#终止" | "#kill":
+                case "#终止" | "#kill" | "#k":
                     await self.kill_thread(command, msg)
                 case "#pull":
                     await self.pull(msg)
@@ -354,7 +394,7 @@ class MinesVariants(BasePlugin):
                         await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
                         return
                     await self.command(' '.join(command[1:]), msg)
-                case "#注册规则":
+                case "#注册规则" | "#reg":
                     command = msg.raw_message.split(" ", 2)
                     if len(command) == 3:
                         # 注册新规则
@@ -408,6 +448,18 @@ class MinesVariants(BasePlugin):
                         return
                     self.data["admin"].remove(target)
                     await self.api.post_group_msg(msg.group_id, response("command", "deop_done"))
+                case "#del":
+                    if "admin" not in self.data:
+                        self.data["admin"] = [3140864122]
+                    if msg.user_id not in self.data["admin"]:
+                        return
+                    if not msg.message[0]["type"] == "reply":
+                        return
+                    message_id = msg.message[0]["data"]["id"]
+                    await self.api.delete_msg(message_id)
+                    await self.api.delete_msg(msg.message_id)
+                case '#hyw':
+                    await self.api.post_group_msg(msg.group_id, response("hyw"))
 
                 # _log.warning(f"Received empty or invalid command in group {msg.group_id}: {msg.raw_message}")
         except Exception as e:
@@ -423,14 +475,36 @@ class MinesVariants(BasePlugin):
                     await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
                 # await self.command(command[1:], msg)
 
-    async def send_message(self, msg, message: str):
+    async def send_message(self, msg, message: str, reply=None, image_path=None):
+        image = None
+        if image_path:
+            with open(image_path, "rb") as f:
+                image = "base64://" + base64.b64encode(f.read()).decode('utf-8')
         if hasattr(msg, "group_id"):
-            await self.api.post_group_msg(msg.group_id, message)
+            await self.api.post_group_msg(msg.group_id, message, reply=reply, image=image)
         else:
-            await self.api.post_private_msg(msg.user_id, message)
+            await self.api.post_private_msg(msg.user_id, message, reply=reply, image=image)
         return
 
     async def register_rules(self, msg, name, doc):
+        reply = None
+        if msg.message[0]["type"] == "reply":
+            reply = msg.message[0]["data"]["id"]
+            reply_msgs = await self.api.get_msg(reply)
+            for reply_msg_part in reply_msgs["data"]["message"]:
+                if reply_msg_part["type"] == "image":
+                    img_url = reply_msg_part["data"]["url"]
+                    _response = requests.get(img_url)
+                    if _response.status_code == 200:
+                        # 从 URL 中提取文件名，或自定义
+                        filename = f"{SELF_PATH}\\img\\" + safe_filename(name) + ".png"
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
+                        with open(filename, "wb") as f:
+                            f.write(_response.content)
+                        _log.info(f"附图保存成功：{filename}")
+                    else:
+                        _log.warning(f"附图下载失败，状态码：{_response}")
+                    break
         rule_todo: list[dict] = yaml.full_load(open(f"{SELF_PATH}/ruleTodo.yaml", "r", encoding="utf-8"))
         rule_data = None
         for rule in rule_todo:
@@ -468,45 +542,20 @@ class MinesVariants(BasePlugin):
             yaml.dump(rule_todo, f, allow_unicode=True)
         if doc:
             await self.send_message(msg, response("categories", "todo_rule_update").format(name))
+            if not reply:
+                _image = f"{SELF_PATH}\\img\\{safe_filename(name)}.png"
+                if os.path.exists(_image):
+                    os.remove(_image)
         else:
             await self.send_message(msg, response("categories", "todo_rule_del").format(name))
-
-    # @bot.group_event()
-    # async def admin(self, messages: GroupMessage):
-    #     member_list = await self.api.get_group_member_list(messages.group_id)
-    #     # print(member_list)
-    #     return
-    #     if "admin" not in self.data:
-    #         self.data["admin"] = []
-    #     admin_data = None
-    #     admin_flag = False
-    #     for msg in messages.message:
-    #         if msg["type"] == "text":
-    #             if msg["data"]["text"].startswith("#admin"):
-    #                 tmp_data = msg["data"]["text"].split("#admin")[1]
-    #                 if not tmp_data.split()[0]:
-    #                     continue
-    #                 tmp_data: str
-    #                 if tmp_data.isdigit():
-    #                     # 是数字就当成qq号
-    #                     admin_data = tmp_data.strip()
-    #                 else:
-    #                     # 不是就看有没有人叫这个
-    #                     member_list = await self.api.get_group_member_list(messages.group_id)
-    #                     print(member_list)
-    #                 admin_flag = True
-    #             return
-    #         if msg["type"] == "at":
-    #             admin_data = str(msg["data"]["qq"])
-    #         if msg["type"] == "reply":
-    #             await self.api.get_msg()
-    #     if admin_data is None:
-    #         return
-    #     if messages.user_id not in self.data["admin"]:
-    #         await self.api.post_group_msg(messages.group_id, response("command", "user_not_admin"))
-    #         return
+            _image = f"{SELF_PATH}\\img\\{safe_filename(name)}.png"
+            if os.path.exists(_image):
+                os.remove(_image)
+        ALL_RULE.clear()
+        self.all_rule()
 
     async def pull(self, msg):
+        await self.send_message(msg, "开始拉取远程库")
         result = []
         returncode, stdout, stderr = await run_command(
             "git pull --recurse-submodules",
@@ -543,74 +592,200 @@ class MinesVariants(BasePlugin):
             else:
                 await self.api.post_private_msg(msg.user_id, response("prompts", "rule_query"))
             return
+
         args = command[1:]
         forcibly = "/f" in args
         if forcibly:
             args.remove("/f")
-        patterns = [regex.compile(arg, regex.IGNORECASE) for arg in args]
-        all_rule = [rule for rules in self.all_rule() for rule in rules]
+
+        regular = "/re" in args
+        if regular:
+            args.remove("/re")
+
+        upper = "/u" in args    # upper为True则大小写严格
+        if upper:
+            args.remove("/u")
+
+        patterns = [
+            regex.compile(arg, *[i for i in [regex.IGNORECASE] if not upper])
+            if regular else arg for arg in args
+        ]
+
+        all_rule = self.all_rule()
+
         result = []
-        for rule in all_rule:
-            if type(rule) is dict:
-                rule = rule.get("content", "")
-            if all(pattern.search(rule, timeout=0.2) for pattern in patterns):
-                if not forcibly:
-                    await self.send_message(msg, rule)
-                    return
-                result.append(rule)
+        if (len(args) == 1) and (not forcibly):
+            for rules_index in range(len(all_rule)):
+                rules = all_rule[rules_index]
+                for rule in rules:
+                    names = rule["name"]
+                    if (
+                        (args[0] in names) or
+                        (not upper and args[0].lower() in [name.lower() for name in names])
+                    ):
+                        doc = rule.get("doc")
+                        image = None
+                        if type(doc) is dict:
+                            doc = doc.get("content")
+                            image = None
+                            if rules_index == 3:
+                                _image = f"{SELF_PATH}\\img\\{safe_filename(names[0])}.png"
+                                if os.path.exists(_image):
+                                    image = _image
+                            else:
+                                _image = get_rule_image(names)
+                                if os.path.exists(_image):
+                                    image = _image
+                        await self.send_message(msg, doc, image_path=image)
+                        return
+
+        for rules_index in range(len(all_rule)):
+            rules = all_rule[rules_index]
+            for rule in rules:
+                rule_doc = rule["doc"]
+                if type(rule_doc) is dict:
+                    rule_doc = rule_doc.copy()
+                if regular and all(
+                    pattern.search(rule_doc, timeout=0.2)
+                    for pattern in patterns
+                ):
+                    if rules_index == 3:
+                        _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
+                        if os.path.exists(_image):
+                            rule_doc["content"] += IMAGE_SPLIT + _image
+                    else:
+                        _image = get_rule_image(rule["name"])
+                        if os.path.exists(_image):
+                            rule_doc["content"] += IMAGE_SPLIT + _image
+                    result.append(rule_doc)
+                elif not regular and all(
+                    (pattern in rule_doc["content"]) if upper else
+                    (pattern.lower() in rule_doc["content"].lower())
+                    for pattern in args
+                ):
+                    if rules_index == 3:
+                        _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
+                        if os.path.exists(_image):
+                            rule_doc["content"] += IMAGE_SPLIT + _image
+                    else:
+                        _image = get_rule_image(rule["name"])
+                        if os.path.exists(_image):
+                            rule_doc["content"] += IMAGE_SPLIT + _image
+                    result.append(rule_doc)
         result_length = len(result)
         if result_length > 100:
             result = [result[i:i+100] for i in range(0, len(result), 100)]
         result = [response("rules", "found_rules").format(result_length, args)] + result
-        await self.send_group_forward_msg_text(result, msg)
+
+        if msg.message_type == "group":
+            await self.send_group_forward_msg_text(result, msg)
+        elif msg.message_type == "private":
+            await self.send_private_forward_msg_text(result, msg)
 
     async def rule_list(self, msg):
-        rules_list = self.all_rule()
         # news = [{"text": response("categories", "left_rules")},
         #         {"text": response("categories", "middle_rules")},
         #         {"text": response("categories", "right_rules")}]
-        await self.send_group_forward_msg_text(
-            rules_list, msg,
-            # source=response("categories", "rules_list")
-        )
 
-    def all_rule(self):
-        with open(f"{SELF_PATH}/rule.tmp", "rb") as f:
-            output = f.read()
-        output = output.decode("utf-8").replace("\r", "")
-        split_symbol, output = output[:50], output[50:]
-        output = output.split(split_symbol * 2)[:-1]
-        rules_list: list[list] = []
-        for i in range(len(output)):
-            rules: list[str] = output[i].split(split_symbol)
-            rules = [[
+        self.all_rule()
+        all_rule: list[list[str | dict]] = []
+        for index in range(3):
+            all_rule.append([[
                 response("categories", "left_rules_title"),
                 response("categories", "middle_rules_title"),
                 response("categories", "right_rules_title"),
-            ][i]] + rules
-            rules_list.append(rules)
+            ][index]])
+            for rule in ALL_RULE[index]:
+                rule_doc: dict = rule["doc"].copy()
+                all_rule[-1].append(rule_doc)
+                _image = get_rule_image(rule["name"])
+                if os.path.exists(_image):
+                    if type(rule_doc) is dict:
+                        rule_doc["content"] += IMAGE_SPLIT + _image
+                    elif type(all_rule[-1][-1]) is str:
+                        rule_doc += IMAGE_SPLIT + _image
+
+        all_rule += [response("categories", "todo_rules_title")]
+
+        result = []
+
+        for rule in ALL_RULE[3]:
+            result.append(rule["doc"].copy())
+            _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
+            if os.path.exists(_image):
+                result[-1]["content"] += IMAGE_SPLIT + _image
+        if len(result) > 100:
+            result = [result[i:i+100] for i in range(0, len(result), 100)]
+        all_rule += result
+
+        await self.send_group_forward_msg_text(
+            all_rule, msg,
+            # source=response("categories", "rules_list")
+        )
+
+    def all_rule(self) -> list[list[dict[str, list[str] | dict | str]]]:
+        """
+        :return: [{"name": ["a", "b", ...], "doc": "..." | {msg}}, ...], ...
+        """
+        global ALL_RULE
+        if ALL_RULE:
+            return ALL_RULE
+        with open(f"{SELF_PATH}/rule.tmp", "rb") as f:
+            output = f.read()
+        output = output.decode("utf-8").replace("\r", "")
+        split_symbol, split_name_symbol, output = output[:50], output[50:60], output[60:]
+        output = output.split(split_symbol * 2)[:-1]
+        rules_list: list[list] = []
+        for i in range(len(output)):
+            rules_list.append([])
+            for rule in output[i].split(split_symbol):
+                rule_parts = rule.split(split_name_symbol)
+                rule_data = {
+                        "name": rule_parts[:-3],
+                        "doc":  {
+                            "content": rule_parts[-1],
+                            "uid": rule_parts[-2] if rule_parts[-2] else None,
+                            "name": rule_parts[-3] if rule_parts[-3] else None
+                        },
+                        "author": (
+                            rule_parts[-3] if rule_parts[-2] else None,
+                            rule_parts[-2] if rule_parts[-3] else None
+                        )
+                    }
+                rules_list[-1].append(rule_data)
         rule_todo_list = yaml.full_load(open(f"{SELF_PATH}/ruleTodo.yaml", "r", encoding="utf-8"))
         todo_rule_fmt = response("categories", "todo_rule_fmt")
         rules_list.append([
-            response("categories", "todo_rules_title")
-        ] + [
             {
-                "content": todo_rule_fmt.format(
-                    data["name"], data["doc"], data["author_name"], data["author_uid"],
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data["time"]))
-                ), "name": data["author_name"], "uid": data["author_uid"]
+                "name": [data["name"]],
+                "author": (data["author_name"], data["author_uid"]),
+                "doc": {
+                    "content": todo_rule_fmt.format(
+                        data["name"], data["doc"], data["author_name"], data["author_uid"],
+                        time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data["time"]))
+                    ), "name": data["author_name"], "uid": data["author_uid"]
+                }
             }
             for data in rule_todo_list
         ])
-        return rules_list
+        ALL_RULE = rules_list
+        return ALL_RULE
 
     async def send_private_forward_msg_text(self, text, msg: PrivateMessage, news=None, source=None, summary=None):
-        def pck(content, user_id=None, nickname=None) -> list:
-            if user_id is None:
-                user_id = response("users", "default_bot", "id")
-            if nickname is None:
-                nickname = response("users", "default_bot", "nickname")
+        NICK_NAME = response("users", "default_bot", "nickname")
+        USER_ID = response("users", "default_bot", "id")
+
+        def pck(content, user_id=USER_ID, nickname=NICK_NAME) -> list:
             if type(content) is str:
+                image = ""
+                if IMAGE_SPLIT in content:
+                    content, image_file_path = content.rsplit(IMAGE_SPLIT, 1)
+                    if image_file_path:
+                        with open(image_file_path, "rb") as f:
+                            image = "base64://" + base64.b64encode(f.read()).decode('utf-8')
+                content = [{"type": "text", "data": {"text": content}}]
+                if image:
+                    content.append({"type": "image", "data": {"file": image}})
                 content = [{"type": "text", "data": {"text": content}}]
                 _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": content}}
                 return [_message]
@@ -622,10 +797,11 @@ class MinesVariants(BasePlugin):
                 _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": _message}}
                 return [_message]
             elif type(content) is dict:
-                uid = content.get("uid", response("users", "default_bot", "id"))
-                name = content.get("name", response("users", "default_bot", "nickname"))
+                uid = content.get("uid", USER_ID)
+                name = content.get("name", NICK_NAME)
                 content = content["content"]
-                return pck(content, user_id=uid, nickname=name)
+                __result = pck(content, user_id=uid, nickname=name)
+                return __result
             else:
                 return []
 
@@ -650,7 +826,15 @@ class MinesVariants(BasePlugin):
 
         def pck(content, user_id=USER_ID, nickname=NICK_NAME) -> list:
             if type(content) is str:
+                image = ""
+                if IMAGE_SPLIT in content:
+                    content, image_file_path = content.rsplit(IMAGE_SPLIT, 1)
+                    if image_file_path:
+                        with open(image_file_path, "rb") as f:
+                            image = "base64://" + base64.b64encode(f.read()).decode('utf-8')
                 content = [{"type": "text", "data": {"text": content}}]
+                if image:
+                    content.append({"type": "image", "data": {"file": image}})
                 _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": content}}
                 return [_message]
             elif type(content) is list:
@@ -718,6 +902,7 @@ class MinesVariants(BasePlugin):
 
     async def state(self, msg):
         result = response("status", "total_processes").format(len(request_map.keys()))
+        result += "\n" + get_system_stats()
         for key in request_map.keys():
             result += response("status", "process_info", "1").format(key, request_map[key].start_time)
             result += response("status", "process_info", "2").format(request_map[key].data)
@@ -734,7 +919,11 @@ class MinesVariants(BasePlugin):
                 await self.api.post_private_msg(msg.user_id, result)
 
     async def kill_thread(self, command, msg):
-        if not command[1].isdigit():
+        kill_list = []
+        for command_arg in command[1:]:
+            if command_arg.isdigit():
+                kill_list.append(int(command_arg))
+        if not kill_list:
             if hasattr(msg, "group_id"):
                 await self.api.post_group_msg(
                     msg.group_id,
@@ -746,31 +935,22 @@ class MinesVariants(BasePlugin):
                     response("errors", "invalid_input")
                 )
             return
-        query_id = int(command[1])
-        if query_id not in request_map:
-            if hasattr(msg, "group_id"):
-                await self.api.post_group_msg(
-                    msg.group_id,
-                    response("task", "not_found")
-                )
-            else:
-                await self.api.post_private_msg(
-                    msg.user_id,
-                    response("task", "not_found")
-                )
-            return
-        request = request_map[query_id]
-        request.close_connection()
-        del request_map[query_id]
+        for query_id in kill_list:
+            if query_id not in request_map:
+                kill_list.remove(query_id)
+                continue
+            request = request_map[query_id]
+            del request_map[query_id]
+            request.close_connection()
         if hasattr(msg, "group_id"):
             await self.api.post_group_msg(
                 msg.group_id,
-                response("task", "terminated")
+                response("task", "terminated").format(f"[{', '.join([str(i) for i in kill_list])}]")
             )
         else:
             await self.api.post_private_msg(
                 msg.user_id,
-                response("task", "terminated")
+                response("task", "terminated").format(f"[{', '.join([str(i) for i in kill_list])}]")
             )
 
     async def query_thread(self, command, msg):
@@ -795,7 +975,7 @@ class MinesVariants(BasePlugin):
         if len(command) > 3 and command[3].isdigit():
             msg_length = int(float(command[3]))
             if msg_length < 1:
-                msg_length = 12000 // str_length
+                msg_length = 8000 // str_length
             if msg_length > 100:
                 msg_length = 100
         else:
@@ -808,6 +988,8 @@ class MinesVariants(BasePlugin):
             )
             return
         result = request_map[query_id].get_output()
+        if result == "":
+            await self.send_message(msg, "终端输出为空")
         if not forcibly:
             for line in result.split("\n")[::-1]:
                 line: str
@@ -841,21 +1023,33 @@ class MinesVariants(BasePlugin):
         except:
             map_data = {}
         if len(command) < 2:
-            await self.api.post_group_msg(
-                msg.group_id,
+            await self.send_message(
+                msg,
                 response("prompts", "generate_usage"),
                 reply=msg.message_id
             )
             del request_map[request.request_id]
             return
         if not command[1].isdigit():
-            await self.api.post_group_msg(
-                msg.group_id,
+            await self.send_message(
+                msg,
                 response("prompts", "size_position"),
                 reply=msg.message_id
             )
             del request_map[request.request_id]
             return
+        if msg.message[0]["type"] == "reply":
+            reply_msg = await self.api.get_msg(msg.message[0]["data"]["id"])
+            reply_message = reply_msg["data"]["message"]
+            for reply_msg_part in reply_message:
+                if reply_msg_part["type"] != "image":
+                    continue
+                replace_image_url = reply_msg_part["data"]["url"]
+                for command_index in range(len(command)):
+                    command_arg = command[command_index]
+                    if "$img" in command_arg:
+                        command[command_index] = command_arg.replace("$img", replace_image_url)
+                break
         size = [command[1]]
         if command[2].isdigit():
             size.append(command[2])
@@ -902,6 +1096,12 @@ class MinesVariants(BasePlugin):
                 rules[rule_index] = rules[rule_index].replace("|", "$2")
             if "&" in rule:
                 rules[rule_index] = rules[rule_index].replace("&", "$3")
+            if ">" in rule:
+                rules[rule_index] = rules[rule_index].replace(">", "$4")
+            if "<" in rule:
+                rules[rule_index] = rules[rule_index].replace("<", "$5")
+            if "%" in rule:
+                rules[rule_index] = rules[rule_index].replace("%", "$6")
 
         args = "-a 5 -s "
         args += " ".join(size)
@@ -913,6 +1113,8 @@ class MinesVariants(BasePlugin):
         for _ in range(1):
             request.run_task(args)
             request.wait_completion()
+            if request.request_id not in request_map:
+                return
             result = request.get_output()
             request.output_buffer.clear()
             request.close_connection()
@@ -933,18 +1135,31 @@ class MinesVariants(BasePlugin):
             request_map[request.request_id] = _request
 
         if state == 0:
-            await self.api.post_group_file(
-                msg.group_id,
-                image=(config_data["out_path"] + "\\" +
-                       str(request.request_id) + "demo.png")
-            )
+            if isinstance(msg, GroupMessage):
+                await self.api.post_group_file(
+                    msg.group_id,
+                    image=(config_data["out_path"] + "\\" +
+                           str(request.request_id) + "demo.png")
+                )
+            elif isinstance(msg, PrivateMessage):
+                await self.api.post_private_file(
+                    msg.user_id,
+                    image=(config_data["out_path"] + "\\" +
+                           str(request.request_id) + "demo.png")
+                )
             with open(config_data["out_path"] + "\\" + str(request.request_id) + "answer.png", "rb") as f:
                 base64_content = "base64://" + base64.b64encode(f.read()).decode('utf-8')
 
-            await self.send_group_forward_msg_image(
-                path=base64_content,
-                msg=msg
-            )
+            if isinstance(msg, GroupMessage):
+                await self.send_group_forward_msg_image(
+                    path=base64_content,
+                    msg=msg
+                )
+            elif isinstance(msg, PrivateMessage):
+                await self.send_private_forward_msg_image(
+                    path=base64_content,
+                    msg=msg
+                )
             pathlib.Path.unlink((config_data["out_path"] + "\\" +
                                  str(request.request_id) + "answer.png"))
             pathlib.Path.unlink((config_data["out_path"] + "\\" +
@@ -954,28 +1169,45 @@ class MinesVariants(BasePlugin):
                                      str(request.request_id) + ".txt"))
             except:
                 ...
-            await self.api.post_group_msg(
-                reply=msg.message_id,
-                text=response("task", "completed"),
-                group_id=msg.group_id
+            if "线索图: " in result:
+                clue_img = result.rsplit("线索图: ")[-1].split("\n")[0]
+            else:
+                clue_img = ""
+            clue_img = f"线索图: {clue_img}\n" if clue_img else ""
+
+            await self.send_message(
+                msg, clue_img + response("task", "completed"),
+                reply=msg.message_id
             )
         if state == 1:
             if request.request_id not in request_map:
                 return
-            await self.api.post_group_msg(
-                msg.group_id,
-                response("task", "failed").format(request.request_id),
-                reply=msg.message_id
-            )
-            await self.send_group_forward_msg_text(
-                text=result,
-                source=response("categories", "terminal_output"),
-                msg=msg
-            )
+            if isinstance(msg, GroupMessage):
+                await self.api.post_group_msg(
+                    msg.group_id,
+                    response("task", "failed").format(request.request_id),
+                    reply=msg.message_id
+                )
+                await self.send_group_forward_msg_text(
+                    text=result,
+                    source=response("categories", "terminal_output"),
+                    msg=msg
+                )
+            elif isinstance(msg, PrivateMessage):
+                await self.api.post_private_msg(
+                    msg.user_id,
+                    response("task", "failed").format(request.request_id),
+                    reply=msg.message_id
+                )
+                await self.send_private_forward_msg_text(
+                    text=result,
+                    source=response("categories", "terminal_output"),
+                    msg=msg
+                )
         if state == 2:
             rule_name = result.split("未找到规则[")[-1].split("]", 1)[0]
-            await self.api.post_group_msg(
-                msg.group_id,
+            await self.send_message(
+                msg,
                 response("errors", "unknown_rule").format(rule_name),
                 reply=msg.message_id
             )
