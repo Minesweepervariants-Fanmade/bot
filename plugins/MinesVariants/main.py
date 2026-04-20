@@ -355,8 +355,9 @@ class MinesVariants(BasePlugin):
 
             # if command:
             #     command[0] = command[0][1:]
-            # if not msg.raw_message.startswith("#test"):
-            #     return
+
+            if not command:
+                return
             match command[0]:
                 case "#生成" | "#sc" | "#summon" | "#run":
                     self.data["id"] += 1
@@ -946,6 +947,7 @@ class MinesVariants(BasePlugin):
                 except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
                     # 进程已退出或无权限，跳过第四行（与原行为一致，原代码无 try 会崩溃，这里安全处理）
                     pass
+            _block += self._query_thread(key)
             return _block
 
         result = response("status", "total_processes").format(len(request_map.keys()))
@@ -1059,27 +1061,71 @@ class MinesVariants(BasePlugin):
             )
             return
         result = request_map[query_id].get_output()
+        log_file_name = config_data["log_path"] + "\\" + str(query_id) + ".log"
+        if os.path.exists(log_file_name):
+            with open(log_file_name, "rb") as log_file:
+                log_file.seek(0, os.SEEK_END)
+                log_file.seek(max(0, log_file.tell() - 16384))
+                log_text = log_file.read().decode("utf-8", errors="ignore")
+        else:
+            log_text = ""
         if result == "":
             await self.send_message(msg, "终端输出为空")
         if not forcibly:
+            reply_text = ""
+            if "生成用时" in log_text:
+                await self.api.post_group_msg(msg.group_id, response("progress", "saving_image"))
+                return
+            if "尝试第" in log_text and "次minesweepervariants" in log_text:
+                try_index = int(log_text.rsplit("尝试第", 1)[1].rsplit("次minesweepervariants")[0])
+                if try_index > 1:
+                    reply_text += response("progress", "retrying").format(try_index)
             for line in result.split("\n")[::-1]:
                 line: str
                 if line.strip() == "":
                     continue
-                if "生成用时" in line:
-                    await self.api.post_group_msg(msg.group_id, response("progress", "saving_image"))
-                    return
                 if "进度" in line:
-                    await self.api.post_group_msg(msg.group_id, line)
+                    await self.api.post_group_msg(
+                        msg.group_id, ((reply_text + "\n") if reply_text else "") + line
+                    )
                     return
-                if "生成失败" in line:
-                    await self.api.post_group_msg(msg.group_id, response("progress", "retrying"))
-                    return
-        result = result
-        result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][::-1]
+            if reply_text:
+                await self.api.post_group_msg(msg.group_id, reply_text)
+                return
+
+        # print(result)
+        reply_text = log_text + "\n" + "\n".join([line for line in result.split("\n")][::-1][:10][::-1])
+        result = [reply_text[i:i + str_length] for i in range(0, len(reply_text), str_length)][::-1][:msg_length][::-1]
         # print(result)
         await self.send_group_forward_msg_text(result, msg=msg)
         return
+
+    def _query_thread(self, query_id):
+        result = request_map[query_id].get_output()
+        log_file_name = config_data["log_path"] + "\\" + str(query_id) + ".log"
+        if os.path.exists(log_file_name):
+            with open(log_file_name, "rb") as log_file:
+                log_file.seek(0, os.SEEK_END)
+                log_file.seek(max(0, log_file.tell() - 16384))
+                log_text = log_file.read().decode("utf-8", errors="ignore")
+        else:
+            log_text = ""
+
+        reply_text = ""
+        if "生成用时" in log_text:
+            return response("progress", "saving_image")
+        if "尝试第" in log_text and "次minesweepervariants" in log_text:
+            try_index = int(log_text.rsplit("尝试第", 1)[1].rsplit("次minesweepervariants")[0])
+            if try_index > 1:
+                reply_text += f"重试第{try_index}次"
+        for line in result.split("\n")[::-1]:
+            line: str
+            if line.strip() == "":
+                continue
+            if "进度" in line:
+                return reply_text + "\n用时:" + line.split("用时:")[1]
+        return reply_text
+
 
     def thread_target(self, msg, command, request):
         # 创建新事件循环
@@ -1199,6 +1245,11 @@ class MinesVariants(BasePlugin):
             request = _request
             request_map[request.request_id] = _request
 
+        with open(config_data["log_path"] + "\\" + str(request.request_id) + ".log", "r") as log_file:
+            log_file.seek(0, os.SEEK_END)
+            log_file.seek(max(0, log_file.tell() - 4096))
+            log_text = log_file.read()
+
         if state == 0:
             if isinstance(msg, GroupMessage):
                 await self.api.post_group_file(
@@ -1232,8 +1283,8 @@ class MinesVariants(BasePlugin):
                                      str(request.request_id) + ".txt"))
             except:
                 ...
-            if "线索图: " in result:
-                clue_img = result.rsplit("线索图: ")[-1].split("\n")[0]
+            if "线索图: " in log_text:
+                clue_img = log_text.rsplit("线索图: ")[-1].split("\n")[0]
             else:
                 clue_img = ""
             clue_img = f"线索图: {clue_img}\n" if clue_img else ""
@@ -1245,18 +1296,23 @@ class MinesVariants(BasePlugin):
         if state == 1:
             if request.request_id not in request_map:
                 return
+            msg_length = 9
+            str_length = 1000
+            err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][::-1]
             if isinstance(msg, GroupMessage):
                 response_text = response("task", "failed").format(request.request_id)
-                if "Traceback (most recent call last)" in result:
-                    traceback = result.split("\n")[-10:-1][::-1]
-                    response_text += "\n" + [i for i in traceback if i][0]
+                if "[STDERR EMPTY]" not in result:
+                    traceback = (result.split("[STDERR]:")[-1].rsplit(":[STDERR]", 1)[0]).split("\n")
+                    print(result)
+                    print(traceback)
+                    response_text += "\n" + [i for i in traceback if i][::-1][0]
                 await self.api.post_group_msg(
                     msg.group_id,
                     response_text,
                     reply=msg.message_id
                 )
                 await self.send_group_forward_msg_text(
-                    text=result,
+                    text=err_result,
                     source=response("categories", "terminal_output"),
                     msg=msg
                 )
@@ -1267,7 +1323,7 @@ class MinesVariants(BasePlugin):
                     reply=msg.message_id
                 )
                 await self.send_private_forward_msg_text(
-                    text=result,
+                    text=err_result,
                     source=response("categories", "terminal_output"),
                     msg=msg
                 )
