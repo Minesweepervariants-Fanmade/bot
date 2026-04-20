@@ -1048,11 +1048,6 @@
   doc: 所有的雷区形状相同
   name: EQ
   time: 1776496320.5338278
-- author_name: 雾
-  author_uid: 3140864122
-  doc: 将兰顿蚂蚁四个方向的结果做异或操作 若无穷大则使用补码形式
-  name: 3A^
-  time: 1776546374.051808
 - author_name: 小中医
   author_uid: 3086842243
   doc: 列平衡，即每列雷数相同。

@@ -384,7 +384,7 @@ class MinesVariants(BasePlugin):
                 case "#查询规则" | "#cxr":
                     await self.search_rule(msg)
                 case "#查询" | "#cx":
-                    await self.query_thread(command, msg)
+                    await self.query_thread(msg)
                 case "#帮助" | "#help" | "#?":
                     try:
                         HELP_TEXT = yaml.full_load(open(f"{SELF_PATH}/help.yaml", "r", encoding="utf-8"))
@@ -475,6 +475,8 @@ class MinesVariants(BasePlugin):
                     await self.api.delete_msg(msg.message_id)
                 case '#hyw':
                     await self.api.post_group_msg(msg.group_id, response("hyw"))
+                case "#":  # 综合
+                    await self.shape(msg)
 
                 # _log.warning(f"Received empty or invalid command in group {msg.group_id}: {msg.raw_message}")
         except Exception as e:
@@ -489,6 +491,35 @@ class MinesVariants(BasePlugin):
                 if msg.user_id not in self.data["admin"]:
                     await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
                 # await self.command(command[1:], msg)
+
+    async def shape(self, msg):
+        # sc/cx/##
+        raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+        command: list[str] = raw_message.split()[1:]
+        if len(command) == 0:  # 如果只有单个#表示状态
+            await self.state(msg)
+        elif command[0].isdigit():
+            # 如果第一个是数字
+            if int(command[0]) < 1000 and "/f" not in command:
+                self.data["id"] += 1
+                self.data.save()
+                request_map[self.data["id"]] = Request(max_length=50, _request_id=self.data["id"])
+                request_map[self.data["id"]].nickname = msg.sender.nickname
+                threading.Thread(
+                    target=self.thread_target, daemon=True,
+                    args=(msg, ["#"] + command[:], request_map[self.data["id"]])
+                ).start()
+                # time.sleep(1)
+                if self.data["id"] in request_map:
+                    await self.send_message(
+                        msg, response("task", "created").format(self.data["id"])
+                    )
+            else:
+                # cx进程
+                await self.query_thread(msg)
+        else:
+            # 如果不是数字就是查询规则
+            await self.search_rule(msg)
 
     async def send_message(self, msg, message: str, reply=None, image_path=None):
         image = None
@@ -1026,7 +1057,9 @@ class MinesVariants(BasePlugin):
                 response("task", "terminated").format(f"[{', '.join([str(i) for i in kill_list])}]")
             )
 
-    async def query_thread(self, command, msg):
+    async def query_thread(self, msg):
+        raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+        command: list[str] = raw_message.split()
         forcibly = "/f" in command
         if forcibly:
             command.remove("/f")
@@ -1125,7 +1158,6 @@ class MinesVariants(BasePlugin):
             if "进度" in line:
                 return reply_text + "\n用时:" + line.split("用时:")[1]
         return reply_text
-
 
     def thread_target(self, msg, command, request):
         # 创建新事件循环
