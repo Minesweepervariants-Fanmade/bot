@@ -162,7 +162,7 @@
   author_uid: 2947571390
   doc: 线索是1K范围，如果一个线索的某个邻格有雷，则该方向上的两个马步格的雷不算。例如一个线索的右邻格是雷，则右偏上和右偏下两格的雷不算。
   name: 1K'
-  time: 1772342915
+  time: 1776388445.5008323
 - author_name: 小小神中医
   author_uid: 3086842243
   doc: 每行每列恰有一个反转格，反转格内的雷算作非雷，非雷算作雷，总雷数不受此规则影响。（副板规则）
@@ -437,11 +437,6 @@
   author_uid: 3086842243
   doc: 行失衡，即每行雷数各不相同。
   name: 3C~
-  time: 1772342915
-- author_name: 小小神中医
-  author_uid: 3086842243
-  doc: 列平衡，即每列雷数相同。
-  name: 3A^
   time: 1772342915
 - author_name: 小小神中医
   author_uid: 3086842243
@@ -972,7 +967,7 @@
   author_uid: 3140864122
   doc: 我要在这里放一个橘雪莉
   name: 橘雪莉
-  time: 1776338472.4754817
+  time: 1776338997.0036473
 - author_name: 雾
   author_uid: 3140864122
   doc: 我要放一个二阶堂希罗在这里
@@ -990,19 +985,9 @@
   time: 1775907675.3730109
 - author_name: NT
   author_uid: 2201963934
-  doc: 回声：抛出参数。
-  name: U-ECHO
-  time: 1775912681.3656888
-- author_name: NT
-  author_uid: 2201963934
   doc: 反混合：对于一张透明图片，分别输入它在白底和黑底上混合颜色的结果，尝试还原原图。
   name: U-SA
   time: 1775913008.316385
-- author_name: NT
-  author_uid: 2201963934
-  doc: 一言：抛出一言（hitokoto.cn）
-  name: U-YY
-  time: 1775913721.9492295
 - author_name: NT
   author_uid: 2201963934
   doc: 乌蒙查分
@@ -1023,3 +1008,88 @@
   doc: '连接: 线索表示能连接周围八格内所有雷的连续路径所需额外添加的最小雷数，路径可以经过不在周围八格中的雷。'
   name: Sc
   time: 1776327472.0158954
+- author_name: 雾
+  author_uid: 3140864122
+  doc: .
+  name: 零组
+  time: 1776389113.0380273
+- author_name: 雾
+  author_uid: 3140864122
+  doc: .
+  name: 光
+  time: 1776389142.6105218
+- author_name: 雾
+  author_uid: 3140864122
+  doc: 线索表示距离最近的 3 个雷的距离之积
+  name: 2P''
+  time: 1776389301.1780667
+- author_name: NT
+  author_uid: 2201963934
+  doc: 树：非雷格四联通形成的无向图是一棵树。
+  name: Tr
+  time: 1776398610.3569946
+- author_name: NT
+  author_uid: 2201963934
+  doc: 指路箭头：题版符合[Tr]，线索箭头表示该节点向根节点的流向方向，〇表示根节点。
+  name: GA
+  time: 1776399278.2349045
+- author_name: 萌
+  author_uid: 1219009468
+  doc: 每行每列的雷数≤(n+1)/2（n为题板边长）
+  name: wB
+  time: 1776410475.3488824
+- author_name: 萌
+  author_uid: 1219009468
+  doc: 正确线索和误差线索按字典序交替出现
+  name: 序
+  time: 1776417550.6025088
+- author_name: 雾
+  author_uid: 3140864122
+  doc: 所有的雷区形状相同
+  name: EQ
+  time: 1776496320.5338278
+- author_name: 雾
+  author_uid: 3140864122
+  doc: 将兰顿蚂蚁四个方向的结果做异或操作 若无穷大则使用补码形式
+  name: 3A^
+  time: 1776546374.051808
+- author_name: 小中医
+  author_uid: 3086842243
+  doc: 列平衡，即每列雷数相同。
+  name: 1B^
+  time: 1776546404.449711
+- author_name: mabopei1
+  author_uid: 81500378
+  doc: 右手法则：线索格从箭头方向出发于非雷格直进，遇到雷格则与雷格前面顺时针旋转90度，线索数字表示于走出题板或遇到重复格子之前经过的格子数（包括线索自身）
+  name: 3A^^
+  time: 1776578584.483817
+- author_name: 雾
+  author_uid: 3140864122
+  doc: 我要在这里放一只森美奈美的女儿
+  name: 若叶睦
+  time: 1776602246.2468822
+- author_name: 瑶曦
+  author_uid: 2152821894
+  doc: 我要在这里放一个樱羽艾玛
+  name: 樱羽艾玛
+  time: 1776602903.0193803
+- author_name: NT
+  author_uid: 2201963934
+  doc: 雷数独：拉丁方规则，但是题版大小只能是8 12 18，且区域形状分别为2x2，3x2，3x3，且有宫内数字不能相同的要求。
+  name: SD
+  time: 1776620019.4414356
+- author_name: 雾
+  author_uid: 3140864122
+  doc: 6767667,7766766
+  name: '67'
+  time: 1776619805.0362313
+- author_name: NT
+  author_uid: 2201963934
+  doc: 拉丁方：正方形题版边长为2n，将原本的每个2x2视为一个区域，一共有nxn个区域，其中的雷数为该区域的值，区域形成的行和列值互不相同，且全盘总共有n种值。
+  name: LD
+  time: 1776620007.9179716
+- author_name: NT
+  author_uid: 2201963934
+  doc: 总雷数
+  name: R
+  time: 1776660604.0119255

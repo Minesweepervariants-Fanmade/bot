@@ -1,20 +1,6 @@
 import socket
 import threading
 
-import yaml
-from ncatbot.core import BotClient
-from ncatbot.utils.config import config
-from ncatbot.utils.logger import get_log
-
-_log = get_log()
-botData = yaml.full_load(open("./data/data.yaml"))["bot"]
-
-config.set_bot_uin(botData["qqid"])  # 设置 bot qq 号 (必填)
-config.set_ws_uri(botData["url"])  # 设置 napcat websocket server 地址
-config.set_token(botData["token"])  # 设置 token (napcat 服务器的 token)
-
-bot = BotClient()
-
 
 def server_listen():
     port = 31409
@@ -31,8 +17,25 @@ def server_listen():
         client.close()
 
 
+thread = threading.Thread(target=server_listen)
+thread.daemon = True
+thread.start()
+
+import yaml
+from ncatbot.core import BotClient
+from ncatbot.utils.config import config
+from ncatbot.utils.logger import get_log
+
+_log = get_log()
+botData = yaml.full_load(open("./data/data.yaml"))["bot"]
+
+config.set_bot_uin(botData["qqid"])  # 设置 bot qq 号 (必填)
+config.set_ws_uri(botData["url"])  # 设置 napcat websocket server 地址
+config.set_token(botData["token"])  # 设置 token (napcat 服务器的 token)
+
+bot = BotClient()
+
+
+
 if __name__ == "__main__":
-    thread = threading.Thread(target=server_listen)
-    thread.daemon = True
-    thread.start()
     bot.run()

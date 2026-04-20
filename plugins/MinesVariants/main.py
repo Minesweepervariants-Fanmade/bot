@@ -10,7 +10,9 @@ import socket
 import threading
 import datetime
 from typing import Union
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import psutil
 import regex
 import requests
 import yaml
@@ -90,7 +92,7 @@ def update_all_rules():
         request = Request()
         request.run_task("list --shell")
         request.wait_completion(timeout=0)
-        lime_time = time.time() + 2.5
+        lime_time = time.time() + 10
         while time.time() < lime_time:
             time.sleep(0.05)
             if "hex_end" in request.get_output():
@@ -113,7 +115,7 @@ def get_system_stats(interval=0.2) -> str:
     import psutil
     cpu_percent = psutil.cpu_percent(interval=interval)  # 1秒采样，避免瞬时波动
     mem = psutil.virtual_memory()
-    return f"CPU: {cpu_percent}% | MEM: {mem.percent}% ({mem.used//(1024**2)}MB/{mem.total//(1024**2)}MB)"
+    return f"CPU: {cpu_percent}% | MEM: {mem.percent}% ({mem.used // (1024 ** 2)}MB/{mem.total // (1024 ** 2)}MB)"
 
 
 def safe_filename(s):
@@ -140,9 +142,9 @@ _log = logger.get_log()
 bot = CompatibleEnrollment
 config_data: dict = yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding="utf-8"))
 
-request_map = {}
+request_map: dict[int, "Request"] = {}
 HOST_IP = get_host_ip()
-ALL_RULE = []   # {name: [], doc: "..."}, ...
+ALL_RULE = []  # {name: [], doc: "..."}, ...
 IMAGE_SPLIT = ''.join([chr(random.randint(33, 126)) for _ in range(50)])
 
 
@@ -156,6 +158,7 @@ class Request:
         self._should_stop = threading.Event()
         self._lock = threading.Lock()  # 用于保护output_buffer的线程安全
         self._completed = threading.Event()
+        self.pid = -1
 
         timestamp = datetime.datetime.now().timestamp()
         dt_object = datetime.datetime.fromtimestamp(timestamp)
@@ -178,8 +181,9 @@ class Request:
         参数:
             args: 传递给bat文件的参数字符串
         """
-        self._thread = threading.Thread(target=self._run_task, args=(args,))
-        self._thread.daemon = True
+        self._thread = threading.Thread(
+            target=self._run_task, args=(args,), daemon=True
+        )
         self._thread.start()
 
     def _run_task(self, args: str) -> None:
@@ -274,7 +278,7 @@ class Request:
     def get_output(self) -> str:
         """获取当前输出内容（线程安全）"""
         with self._lock:
-            return ''.join(self.output_buffer)
+            return '\n'.join(self.output_buffer)
 
     def is_completed(self) -> bool:
         """检查任务是否已完成"""
@@ -299,8 +303,10 @@ class MinesVariants(BasePlugin):
                     self.data["id"] += 1
                     request_map[self.data["id"]] = Request(max_length=50, _request_id=self.data["id"])
                     request_map[self.data["id"]].nickname = msg.sender.nickname
-                    threading.Thread(target=self.thread_target,
-                                     args=(msg, command[:], request_map[self.data["id"]])).start()
+                    threading.Thread(
+                        target=self.thread_target, daemon=True,
+                        args=(msg, command[:], request_map[self.data["id"]])
+                    ).start()
                     time.sleep(1)
                     if self.data["id"] in request_map:
                         await self.api.post_private_msg(
@@ -308,19 +314,25 @@ class MinesVariants(BasePlugin):
                         )
                 case "#所有规则" | "#规则列表" | "#list":
                     await self.rule_list(msg)
-                case "#查询规则":
+                case "#查询规则" | "#cxr":
                     await self.search_rule(msg)
                 case "#查询" | "#cx":
                     await self.query_thread(command, msg)
-                case "#帮助" | "#help":
+                case "#帮助" | "#help" | "#?":
                     HELP_TEXT = yaml.full_load(open(f"{SELF_PATH}/help.yaml", "r", encoding="utf-8"))
                     await self.send_private_forward_msg_text(HELP_TEXT, msg)
-                case "#状态" | "#state":
+                case "#状态" | "#state" | "##":
                     await self.state(msg)
-                case "#终止" | "#kill":
+                case "#终止" | "#kill" | "#k":
                     await self.kill_thread(command, msg)
                 case "#pull":
                     await self.pull(msg)
+                case "#update":
+                    await self.api.post_private_msg(msg.user_id, response("categories", "update_start"))
+                    if update_all_rules():
+                        await self.api.post_private_msg(msg.user_id, response("categories", "update_end"))
+                    else:
+                        await self.api.post_private_msg(msg.user_id, response("categories", "update_fail"))
             # _log.warning(f"Received empty or invalid command: {msg.raw_message}")
         except Exception as e:
             _log.error(f"Error in on_private_event: {e}", exc_info=True)
@@ -351,8 +363,10 @@ class MinesVariants(BasePlugin):
                     self.data.save()
                     request_map[self.data["id"]] = Request(max_length=50, _request_id=self.data["id"])
                     request_map[self.data["id"]].nickname = msg.sender.nickname
-                    threading.Thread(target=self.thread_target,
-                                     args=(msg, command[:], request_map[self.data["id"]])).start()
+                    threading.Thread(
+                        target=self.thread_target, daemon=True,
+                        args=(msg, command[:], request_map[self.data["id"]])
+                    ).start()
                     # time.sleep(1)
                     if self.data["id"] in request_map:
                         await self.api.post_group_msg(
@@ -510,8 +524,8 @@ class MinesVariants(BasePlugin):
         for rule in rule_todo:
             if rule["name"] == name:
                 if (
-                    int(rule["author_uid"]) != int(msg.user_id) and
-                    msg.user_id not in self.data["admin"]
+                        int(rule["author_uid"]) != int(msg.user_id) and
+                        msg.user_id not in self.data["admin"]
                 ):
                     await self.send_message(msg, response("categories", "todo_rule_unauthor"))
                     return
@@ -602,7 +616,7 @@ class MinesVariants(BasePlugin):
         if regular:
             args.remove("/re")
 
-        upper = "/u" in args    # upper为True则大小写严格
+        upper = "/u" in args  # upper为True则大小写严格
         if upper:
             args.remove("/u")
 
@@ -614,14 +628,14 @@ class MinesVariants(BasePlugin):
         all_rule = self.all_rule()
 
         result = []
-        if (len(args) == 1) and (not forcibly):
+        if (len(args) == 1) and (not forcibly) and (not regular):
             for rules_index in range(len(all_rule)):
                 rules = all_rule[rules_index]
                 for rule in rules:
                     names = rule["name"]
                     if (
-                        (args[0] in names) or
-                        (not upper and args[0].lower() in [name.lower() for name in names])
+                            (args[0] in names) or
+                            (not upper and args[0].lower() in [name.lower() for name in names])
                     ):
                         doc = rule.get("doc")
                         image = None
@@ -642,12 +656,12 @@ class MinesVariants(BasePlugin):
         for rules_index in range(len(all_rule)):
             rules = all_rule[rules_index]
             for rule in rules:
-                rule_doc = rule["doc"]
+                rule_doc: dict = rule["doc"]
                 if type(rule_doc) is dict:
                     rule_doc = rule_doc.copy()
                 if regular and all(
-                    pattern.search(rule_doc, timeout=0.2)
-                    for pattern in patterns
+                        pattern.search(rule_doc["content"], timeout=0.2)
+                        for pattern in patterns
                 ):
                     if rules_index == 3:
                         _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
@@ -659,9 +673,9 @@ class MinesVariants(BasePlugin):
                             rule_doc["content"] += IMAGE_SPLIT + _image
                     result.append(rule_doc)
                 elif not regular and all(
-                    (pattern in rule_doc["content"]) if upper else
-                    (pattern.lower() in rule_doc["content"].lower())
-                    for pattern in args
+                        (pattern in rule_doc["content"]) if upper else
+                        (pattern.lower() in rule_doc["content"].lower())
+                        for pattern in args
                 ):
                     if rules_index == 3:
                         _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
@@ -674,7 +688,7 @@ class MinesVariants(BasePlugin):
                     result.append(rule_doc)
         result_length = len(result)
         if result_length > 100:
-            result = [result[i:i+100] for i in range(0, len(result), 100)]
+            result = [result[i:i + 100] for i in range(0, len(result), 100)]
         result = [response("rules", "found_rules").format(result_length, args)] + result
 
         if msg.message_type == "group":
@@ -691,10 +705,10 @@ class MinesVariants(BasePlugin):
         all_rule: list[list[str | dict]] = []
         for index in range(3):
             all_rule.append([[
-                response("categories", "left_rules_title"),
-                response("categories", "middle_rules_title"),
-                response("categories", "right_rules_title"),
-            ][index]])
+                                 response("categories", "left_rules_title"),
+                                 response("categories", "middle_rules_title"),
+                                 response("categories", "right_rules_title"),
+                             ][index]])
             for rule in ALL_RULE[index]:
                 rule_doc: dict = rule["doc"].copy()
                 all_rule[-1].append(rule_doc)
@@ -715,7 +729,7 @@ class MinesVariants(BasePlugin):
             if os.path.exists(_image):
                 result[-1]["content"] += IMAGE_SPLIT + _image
         if len(result) > 100:
-            result = [result[i:i+100] for i in range(0, len(result), 100)]
+            result = [result[i:i + 100] for i in range(0, len(result), 100)]
         all_rule += result
 
         await self.send_group_forward_msg_text(
@@ -741,17 +755,17 @@ class MinesVariants(BasePlugin):
             for rule in output[i].split(split_symbol):
                 rule_parts = rule.split(split_name_symbol)
                 rule_data = {
-                        "name": rule_parts[:-3],
-                        "doc":  {
-                            "content": rule_parts[-1],
-                            "uid": rule_parts[-2] if rule_parts[-2] else None,
-                            "name": rule_parts[-3] if rule_parts[-3] else None
-                        },
-                        "author": (
-                            rule_parts[-3] if rule_parts[-2] else None,
-                            rule_parts[-2] if rule_parts[-3] else None
-                        )
-                    }
+                    "name": rule_parts[:-3],
+                    "doc": {
+                        "content": rule_parts[-1],
+                        "uid": rule_parts[-2] if rule_parts[-2] else None,
+                        "name": rule_parts[-3] if rule_parts[-3] else None
+                    },
+                    "author": (
+                        rule_parts[-3] if rule_parts[-2] else None,
+                        rule_parts[-2] if rule_parts[-3] else None
+                    )
+                }
                 rules_list[-1].append(rule_data)
         rule_todo_list = yaml.full_load(open(f"{SELF_PATH}/ruleTodo.yaml", "r", encoding="utf-8"))
         todo_rule_fmt = response("categories", "todo_rule_fmt")
@@ -901,12 +915,64 @@ class MinesVariants(BasePlugin):
         return check_and_log(await self.api._http.post("/send_private_forward_msg", json=params))
 
     async def state(self, msg):
+        def _get_process_info_block(key, proc_info):
+            """
+            获取单个进程的信息块（保持原有换行格式）
+            返回字符串：开头的换行 + 三行基本信息 + （如有 pid）第四行 CPU/内存
+            """
+            _block = "\n"
+            _block += response("status", "process_info", "1").format(
+                key, proc_info.pid, proc_info.start_time
+            )
+            _block += response("status", "process_info", "2").format(proc_info.data)
+            _block += response("status", "process_info", "3").format(proc_info.nickname)
+
+            if proc_info.pid:
+                try:
+                    process = psutil.Process(proc_info.pid)
+                    # 内存信息
+                    rss = process.memory_info().rss
+                    memory_info = "NAN"
+                    for unit in ['B', 'KB', 'MB', 'GB']:
+                        if rss < 1024.0:
+                            memory_info = f"{rss:.1f}{unit}"
+                            break
+                        rss /= 1024.0
+                    # CPU 使用率（阻塞 0.2 秒，但在多线程中并发执行）
+                    cpu_percent = process.cpu_percent(interval=0.2)
+                    cpu_usage = round(cpu_percent / psutil.cpu_count(), 2)
+                    # 第四行前添加换行（与原逻辑一致）
+                    _block += "\n" + response("status", "process_info", "4").format(cpu_usage, memory_info)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
+                    # 进程已退出或无权限，跳过第四行（与原行为一致，原代码无 try 会崩溃，这里安全处理）
+                    pass
+            return _block
+
         result = response("status", "total_processes").format(len(request_map.keys()))
-        result += "\n" + get_system_stats()
-        for key in request_map.keys():
-            result += response("status", "process_info", "1").format(key, request_map[key].start_time)
-            result += response("status", "process_info", "2").format(request_map[key].data)
-            result += response("status", "process_info", "3").format(request_map[key].nickname)
+        result += "\n" + get_system_stats()  # get_system_stats 内部可能也有阻塞，但只调用一次
+
+        keys = list(request_map.keys())
+        if keys:
+            # 并发获取所有进程信息块，保持顺序
+            blocks = [""] * len(keys)
+            with ThreadPoolExecutor(max_workers=len(keys)) as executor:
+                future_to_idx = {}
+                for idx, key in enumerate(keys):
+                    future = executor.submit(_get_process_info_block, key, request_map[key])
+                    future_to_idx[future] = idx
+
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    try:
+                        blocks[idx] = future.result()
+                    except Exception:
+                        blocks[idx] = ""  # 出错时留空，不影响其他进程
+
+            # 按原顺序拼接
+            for block in blocks:
+                if block:
+                    result += block
+
         if len(request_map.keys()) > 3:
             if hasattr(msg, "group_id"):
                 await self.send_group_forward_msg_text(result, msg)
@@ -920,6 +986,8 @@ class MinesVariants(BasePlugin):
 
     async def kill_thread(self, command, msg):
         kill_list = []
+        if "all" in command:
+            command.extend([str(i) for i in request_map.keys()])
         for command_arg in command[1:]:
             if command_arg.isdigit():
                 kill_list.append(int(command_arg))
@@ -939,6 +1007,9 @@ class MinesVariants(BasePlugin):
             if query_id not in request_map:
                 kill_list.remove(query_id)
                 continue
+            if msg.sender.user_id not in self.data["admin"]:
+                if request_map[query_id].nickname != msg.sender.nickname:
+                    continue
             request = request_map[query_id]
             del request_map[query_id]
             request.close_connection()
@@ -1005,7 +1076,7 @@ class MinesVariants(BasePlugin):
                     await self.api.post_group_msg(msg.group_id, response("progress", "retrying"))
                     return
         result = result
-        result = [result[i:i+str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][::-1]
+        result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][::-1]
         # print(result)
         await self.send_group_forward_msg_text(result, msg=msg)
         return
@@ -1017,11 +1088,7 @@ class MinesVariants(BasePlugin):
         loop.run_until_complete(self.spawn(msg, command, request))
         loop.close()
 
-    async def spawn(self, msg, command, request):
-        try:
-            map_data = yaml.full_load(open(f"{SELF_PATH}/map.yaml", "r", encoding="utf-8"))
-        except:
-            map_data = {}
+    async def spawn(self, msg, command, request: Request):
         if len(command) < 2:
             await self.send_message(
                 msg,
@@ -1056,31 +1123,20 @@ class MinesVariants(BasePlugin):
             command = command[3:]
         else:
             command = command[2:]
-        rules = []
-        for rule in command:
-            if rule.startswith("-"):
-                rules.extend(command[command.index(rule):])
-                break
-            if rule in map_data.keys():
-                if type(map_data[rule]) is str:
-                    rules.append(map_data[rule])
-                if type(map_data[rule]) is list:
-                    rules.extend(map_data[rule])
-            else:
-                rules.append(rule)
-        for rule in rules[:]:
-            if rules.count(rule) > 1:
-                rules.remove(rule)
+        rules = command
+        # for rule in rules[:]:
+        #     if rules.count(rule) > 1:
+        #         rules.remove(rule)
 
         data = rules[:]
-        if "-d" in data:
-            data = data[:data.index("-d")] + data[data.index("-d") + 2:]
-        if "-t" in data:
-            data = data[:data.index("-t")] + data[data.index("-t") + 2:]
-        if "-a" in data:
-            data = data[:data.index("-a")] + data[data.index("-a") + 2:]
-        if "-r" in data:
-            data.remove("-r")
+        # if "-d" in data:
+        #     data = data[:data.index("-d")] + data[data.index("-d") + 2:]
+        # if "-t" in data:
+        #     data = data[:data.index("-t")] + data[data.index("-t") + 2:]
+        # if "-a" in data:
+        #     data = data[:data.index("-a")] + data[data.index("-a") + 2:]
+        # if "-r" in data:
+        #     data.remove("-r")
         request.data += "尺寸:"
         request.data += "x".join(size)
         request.data += " 规则:"
@@ -1110,8 +1166,17 @@ class MinesVariants(BasePlugin):
         args += " --file-name " + str(request.request_id)
         state = 1
         result = ""
+        demo_img = config_data["out_path"] + "\\" + str(request.request_id) + "demo.png"
+        answer_img = config_data["out_path"] + "\\" + str(request.request_id) + "answer.png"
         for _ in range(1):
             request.run_task(args)
+            while "PID" not in ''.join(request.output_buffer):
+                time.sleep(0.1)
+            request.pid = int(
+                [
+                    i for i in request.output_buffer if "PID" in i
+                ][0].split("PID:[")[1].split("]")[0]
+            )
             request.wait_completion()
             if request.request_id not in request_map:
                 return
@@ -1125,7 +1190,7 @@ class MinesVariants(BasePlugin):
             if "未找到规则" in result:
                 state = 2
                 break
-            if "Image saved to:" in result:
+            if os.path.exists(demo_img) and os.path.exists(answer_img):
                 state = 0
                 break
             _request = request.clone()
@@ -1138,16 +1203,14 @@ class MinesVariants(BasePlugin):
             if isinstance(msg, GroupMessage):
                 await self.api.post_group_file(
                     msg.group_id,
-                    image=(config_data["out_path"] + "\\" +
-                           str(request.request_id) + "demo.png")
+                    image=demo_img
                 )
             elif isinstance(msg, PrivateMessage):
                 await self.api.post_private_file(
                     msg.user_id,
-                    image=(config_data["out_path"] + "\\" +
-                           str(request.request_id) + "demo.png")
+                    image=demo_img
                 )
-            with open(config_data["out_path"] + "\\" + str(request.request_id) + "answer.png", "rb") as f:
+            with open(answer_img, "rb") as f:
                 base64_content = "base64://" + base64.b64encode(f.read()).decode('utf-8')
 
             if isinstance(msg, GroupMessage):
@@ -1183,9 +1246,13 @@ class MinesVariants(BasePlugin):
             if request.request_id not in request_map:
                 return
             if isinstance(msg, GroupMessage):
+                response_text = response("task", "failed").format(request.request_id)
+                if "Traceback (most recent call last)" in result:
+                    traceback = result.split("\n")[-10:-1][::-1]
+                    response_text += "\n" + [i for i in traceback if i][0]
                 await self.api.post_group_msg(
                     msg.group_id,
-                    response("task", "failed").format(request.request_id),
+                    response_text,
                     reply=msg.message_id
                 )
                 await self.send_group_forward_msg_text(
@@ -1213,7 +1280,6 @@ class MinesVariants(BasePlugin):
             )
 
         del request_map[request.request_id]
-
 
 # if __name__ == '__main__':
 #     output = ""
