@@ -1150,7 +1150,7 @@ class MinesVariants(BasePlugin):
         if "尝试第" in log_text and "次minesweepervariants" in log_text:
             try_index = int(log_text.rsplit("尝试第", 1)[1].rsplit("次minesweepervariants")[0])
             if try_index > 1:
-                reply_text += f"重试第{try_index}次"
+                reply_text += f"\n重试第{try_index}次"
         for line in result.split("\n")[::-1]:
             line: str
             if line.strip() == "":
@@ -1330,6 +1330,7 @@ class MinesVariants(BasePlugin):
                 return
             msg_length = 9
             str_length = 1000
+            result = log_text + '\n'.join([i for i in result.split("\n")][-20:])
             err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][::-1]
             if isinstance(msg, GroupMessage):
                 response_text = response("task", "failed").format(request.request_id)
