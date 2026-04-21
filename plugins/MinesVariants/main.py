@@ -1330,14 +1330,14 @@ class MinesVariants(BasePlugin):
                 return
             msg_length = 9
             str_length = 1000
-            result = log_text + '\n'.join([i for i in result.split("\n")][-20:])
+            result = log_text + '\n'.join([i for i in result.split("\n")][-50:])
             err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][::-1]
             if isinstance(msg, GroupMessage):
                 response_text = response("task", "failed").format(request.request_id)
                 if "[STDERR EMPTY]" not in result:
                     traceback = (result.split("[STDERR]:")[-1].rsplit(":[STDERR]", 1)[0]).split("\n")
-                    print(result)
-                    print(traceback)
+                    # print(result)
+                    # print(traceback)
                     response_text += "\n" + [i for i in traceback if i][::-1][0]
                 await self.api.post_group_msg(
                     msg.group_id,
