@@ -990,7 +990,7 @@ class MinesVariants(BasePlugin):
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 提交系统状态任务（索引0）
-            future_sys = executor.submit(executor.submit(get_system_stats, interval))
+            future_sys = executor.submit(get_system_stats, interval)
 
             # 提交所有进程信息任务，按顺序保存 future
             process_futures = []
