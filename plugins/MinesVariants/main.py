@@ -110,9 +110,11 @@ def update_all_rules():
     return True
 
 
-def get_system_stats(interval=0.2) -> str:
+def get_system_stats(interval=None) -> str:
     """获取系统 CPU 和内存占用，返回格式化字符串"""
     import psutil
+    if interval is None:
+        interval = config_data["interval"]
     cpu_percent = psutil.cpu_percent(interval=interval)  # 1秒采样，避免瞬时波动
     mem = psutil.virtual_memory()
     return f"CPU: {cpu_percent}% | MEM: {mem.percent}% ({mem.used // (1024 ** 2)}MB/{mem.total // (1024 ** 2)}MB)"
@@ -947,22 +949,17 @@ class MinesVariants(BasePlugin):
         return check_and_log(await self.api._http.post("/send_private_forward_msg", json=params))
 
     async def state(self, msg):
-        def _get_process_info_block(key, proc_info):
-            """
-            获取单个进程的信息块（保持原有换行格式）
-            返回字符串：开头的换行 + 三行基本信息 + （如有 pid）第四行 CPU/内存
-            """
+        def _get_process_info_block(key, proc_info, _interval=None):
+            """获取单个进程的信息块（已包含开头的换行）"""
+            if _interval is None:
+                _interval = config_data["interval"]
             _block = "\n"
-            _block += response("status", "process_info", "1").format(
-                key, proc_info.pid, proc_info.start_time
-            )
+            _block += response("status", "process_info", "1").format(key, proc_info.start_time)
             _block += response("status", "process_info", "2").format(proc_info.data)
             _block += response("status", "process_info", "3").format(proc_info.nickname)
-
             if proc_info.pid:
                 try:
                     process = psutil.Process(proc_info.pid)
-                    # 内存信息
                     rss = process.memory_info().rss
                     memory_info = "NAN"
                     for unit in ['B', 'KB', 'MB', 'GB']:
@@ -970,41 +967,46 @@ class MinesVariants(BasePlugin):
                             memory_info = f"{rss:.1f}{unit}"
                             break
                         rss /= 1024.0
-                    # CPU 使用率（阻塞 0.2 秒，但在多线程中并发执行）
-                    cpu_percent = process.cpu_percent(interval=0.2)
+                    cpu_percent = process.cpu_percent(interval=_interval)
                     cpu_usage = round(cpu_percent / psutil.cpu_count(), 2)
-                    # 第四行前添加换行（与原逻辑一致）
                     _block += "\n" + response("status", "process_info", "4").format(cpu_usage, memory_info)
                 except (psutil.NoSuchProcess, psutil.AccessDenied, Exception):
-                    # 进程已退出或无权限，跳过第四行（与原行为一致，原代码无 try 会崩溃，这里安全处理）
+                    # 进程已退出或无权限，跳过该行
                     pass
-            _block += self._query_thread(key)
             return _block
 
+        # ---------- 主逻辑 ----------
         result = response("status", "total_processes").format(len(request_map.keys()))
-        result += "\n" + get_system_stats()  # get_system_stats 内部可能也有阻塞，但只调用一次
+        command: list[str] = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip().split()
+        if len(command) > 1 and command[1].replace(".", "").isdigit():
+            interval = float(command[1])
+        else:
+            interval = config_data["interval"]
 
         keys = list(request_map.keys())
-        if keys:
-            # 并发获取所有进程信息块，保持顺序
-            blocks = [""] * len(keys)
-            with ThreadPoolExecutor(max_workers=len(keys)) as executor:
-                future_to_idx = {}
-                for idx, key in enumerate(keys):
-                    future = executor.submit(_get_process_info_block, key, request_map[key])
-                    future_to_idx[future] = idx
+        num_processes = len(keys)
+        # 线程池最大工作线程数：系统状态任务 + 进程任务，限制上限避免过多线程
+        max_workers = min(num_processes + 1, 10)
 
-                for future in as_completed(future_to_idx):
-                    idx = future_to_idx[future]
-                    try:
-                        blocks[idx] = future.result()
-                    except Exception:
-                        blocks[idx] = ""  # 出错时留空，不影响其他进程
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 提交系统状态任务（索引0）
+            future_sys = executor.submit(executor.submit(get_system_stats, interval))
 
-            # 按原顺序拼接
-            for block in blocks:
-                if block:
-                    result += block
+            # 提交所有进程信息任务，按顺序保存 future
+            process_futures = []
+            for key in keys:
+                process_futures.append(executor.submit(_get_process_info_block, key, request_map[key], interval))
+
+            # 获取系统状态结果（会阻塞直到完成）
+            sys_stats = future_sys.result()
+
+            # 按原顺序获取所有进程信息结果
+            process_blocks = [fut.result() for fut in process_futures]
+
+        # 拼接最终结果：先加系统状态（原代码有换行）
+        result += "\n" + sys_stats
+        for block in process_blocks:
+            result += block
 
         if len(request_map.keys()) > 3:
             if hasattr(msg, "group_id"):
