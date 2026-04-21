@@ -1029,7 +1029,13 @@ class MinesVariants(BasePlugin):
                 else:
                     await self.api.post_private_msg(msg.user_id, result)
 
-        await asyncio.wrap_future(_main())
+        def _run_main_in_thread():
+            """在新线程中运行 _main"""
+            asyncio.run(_main())  # 在新线程中创建新的事件循环
+
+        # 在 state 函数里：
+        t = threading.Thread(target=_run_main_in_thread, daemon=True)
+        t.start()  # 非阻塞，立即返回，不卡主线程
 
     async def kill_thread(self, command, msg):
         kill_list = []
