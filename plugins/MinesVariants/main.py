@@ -1029,7 +1029,7 @@ class MinesVariants(BasePlugin):
                 else:
                     await self.api.post_private_msg(msg.user_id, result)
 
-        await asyncio.create_task(_main())
+        await asyncio.wrap_future(_main())
 
     async def kill_thread(self, command, msg):
         kill_list = []
