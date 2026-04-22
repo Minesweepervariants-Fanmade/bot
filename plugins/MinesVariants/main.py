@@ -309,7 +309,7 @@ class MinesVariants(BasePlugin):
                         target=self.thread_target, daemon=True,
                         args=(msg, command[:], request_map[self.data["id"]])
                     ).start()
-                    time.sleep(1)
+                    # time.sleep(1)
                     if self.data["id"] in request_map:
                         await self.api.post_private_msg(
                             msg.user_id, response("task", "created").format(self.data["id"])
