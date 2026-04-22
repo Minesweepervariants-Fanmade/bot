@@ -319,7 +319,7 @@ class MinesVariants(BasePlugin):
                 case "#查询规则" | "#cxr":
                     await self.search_rule(msg)
                 case "#查询" | "#cx":
-                    await self.query_thread(command, msg)
+                    await self.query_thread(msg)
                 case "#帮助" | "#help" | "#?":
                     HELP_TEXT = yaml.full_load(open(f"{SELF_PATH}/help.yaml", "r", encoding="utf-8"))
                     await self.send_private_forward_msg_text(HELP_TEXT, msg)
@@ -1216,11 +1216,14 @@ class MinesVariants(BasePlugin):
                         command[command_index] = command_arg.replace("$img", replace_image_url)
                 break
         size = [command[1]]
-        if command[2].isdigit():
-            size.append(command[2])
-            command = command[3:]
+        if len(command) > 2:
+            if command[2].isdigit():
+                size.append(command[2])
+                command = command[3:]
+            else:
+                command = command[2:]
         else:
-            command = command[2:]
+            command = []
         if not command:
             await self.send_message(
                 msg,
