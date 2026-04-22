@@ -1221,6 +1221,14 @@ class MinesVariants(BasePlugin):
             command = command[3:]
         else:
             command = command[2:]
+        if not command:
+            await self.send_message(
+                msg,
+                response("prompts", "generate_usage"),
+                reply=msg.message_id
+            )
+            del request_map[request.request_id]
+            return
         rules = command
         # for rule in rules[:]:
         #     if rules.count(rule) > 1:
