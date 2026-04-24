@@ -2,4 +2,4 @@
 "log_path": "D:\\MinesweeperVariants\\log" # MinesweeperVariants项目的输出路径
 "image_path": "D:\\MinesweeperVariants\\minesweepervariants\\impl\\rule\\image"   # 规则附图位置
 "porject_path": "D:\\MinesweeperVariants"
-"interval": 1
+"interval": 0.5
