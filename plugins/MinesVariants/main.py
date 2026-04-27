@@ -176,23 +176,26 @@ class Request:
         request.output_buffer = self.output_buffer
         return request
 
-    def run_task(self, args: str) -> None:
+    def run_task(self, args: str, host: str = "local") -> None:
         """
         启动新线程运行任务（异步执行）
 
         参数:
-            args: 传递给bat文件的参数字符串
+            args: 传递的参数字符串
+            host: 目标主机
         """
         self._thread = threading.Thread(
             target=self._run_task, args=(args,), daemon=True
         )
         self._thread.start()
 
-    def _run_task(self, args: str) -> None:
+    def _run_task(self, args: str,
+                  host: str = "localhost",
+                  port: int = 31408) -> None:
         """实际执行任务的线程函数"""
         try:
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.connect(('localhost', 31408))
+            client.connect((host, port))
             self._socket = client  # 保存socket引用用于关闭
 
             # 接收初始握手信号
