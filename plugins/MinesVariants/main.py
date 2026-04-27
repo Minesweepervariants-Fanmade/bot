@@ -1124,6 +1124,7 @@ class MinesVariants(BasePlugin):
             log_text = ""
         if result == "":
             await self.send_message(msg, "终端输出为空")
+            return 
         if not forcibly:
             reply_text = ""
             if "生成用时" in log_text:
@@ -1308,10 +1309,15 @@ class MinesVariants(BasePlugin):
             request = _request
             request_map[request.request_id] = _request
 
-        with open(config_data["log_path"] + "\\" + str(request.request_id) + ".log", "r") as log_file:
-            log_file.seek(0, os.SEEK_END)
-            log_file.seek(max(0, log_file.tell() - 4096))
-            log_text = log_file.read()
+        log_path = config_data["log_path"] + "\\" + str(request.request_id) + ".log"
+        if os.path.exists(log_path):
+            with open(log_path, "rb") as f:
+                f.seek(max(0, os.path.getsize(log_path) - 4096))
+                raw = f.read()
+                log_text = raw.decode("utf-8", errors="replace")  # 非法字节变 �
+        else:
+            print(result)
+            log_text = "[EMPTY]"
 
         if state == 0:
             if isinstance(msg, GroupMessage):
@@ -1361,7 +1367,7 @@ class MinesVariants(BasePlugin):
                 return
             msg_length = 9
             str_length = 1000
-            result = log_text + '\n'.join([i for i in result.split("\n")][-50:])
+            result = log_text + "\n\n" + '\n'.join([i for i in result.split("\n")][-50:])
             err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][::-1]
             if isinstance(msg, GroupMessage):
                 response_text = response("task", "failed").format(request.request_id)
