@@ -988,7 +988,8 @@ class MinesVariants(BasePlugin):
         async def _main():
             # ---------- 主逻辑 ----------
             result = response("status", "total_processes").format(len(request_map.keys()))
-            command: list[str] = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip().split()
+            command: list[str] = ''.join(
+                [i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip().split()
             if len(command) > 1 and command[1].replace(".", "").isdigit():
                 interval = float(command[1])
             else:
@@ -1124,7 +1125,7 @@ class MinesVariants(BasePlugin):
             log_text = ""
         if result == "":
             await self.send_message(msg, "终端输出为空")
-            return 
+            return
         if not forcibly:
             reply_text = ""
             if "生成用时" in log_text:
@@ -1276,8 +1277,11 @@ class MinesVariants(BasePlugin):
         args += " --file-name " + str(request.request_id)
         state = 1
         result = ""
+
         demo_img = config_data["out_path"] + "\\" + str(request.request_id) + "demo.png"
         answer_img = config_data["out_path"] + "\\" + str(request.request_id) + "answer.png"
+        log_path = config_data["log_path"] + "\\" + str(request.request_id) + ".log"
+
         for _ in range(1):
             request.run_task(args)
             while "PID" not in ''.join(request.output_buffer):
@@ -1309,7 +1313,6 @@ class MinesVariants(BasePlugin):
             request = _request
             request_map[request.request_id] = _request
 
-        log_path = config_data["log_path"] + "\\" + str(request.request_id) + ".log"
         if os.path.exists(log_path):
             with open(log_path, "rb") as f:
                 f.seek(max(0, os.path.getsize(log_path) - 4096))
