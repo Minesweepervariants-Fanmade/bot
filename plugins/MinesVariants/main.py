@@ -482,6 +482,9 @@ class MinesVariants(BasePlugin):
                     await self.api.post_group_msg(msg.group_id, response("hyw"))
                 case "#":  # 综合
                     await self.shape(msg)
+                    return
+                case _:
+                    await self.shape(msg, raw_message[1:].split())
 
                 # _log.warning(f"Received empty or invalid command in group {msg.group_id}: {msg.raw_message}")
         except Exception as e:
@@ -497,10 +500,11 @@ class MinesVariants(BasePlugin):
                     await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
                 # await self.command(command[1:], msg)
 
-    async def shape(self, msg):
+    async def shape(self, msg, command=None):
         # sc/cx/##
-        raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
-        command: list[str] = raw_message.split()[1:]
+        if command is None:
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()[1:]
         if len(command) == 0:  # 如果只有单个#表示状态
             await self.state(msg)
         elif command[0].isdigit():
@@ -521,10 +525,10 @@ class MinesVariants(BasePlugin):
                     )
             else:
                 # cx进程
-                await self.query_thread(msg)
+                await self.query_thread(msg, [""] + command)
         else:
             # 如果不是数字就是查询规则
-            await self.search_rule(msg)
+            await self.search_rule(msg, [""] + command)
 
     async def send_message(self, msg, message: str, reply=None, image_path=None):
         image = None
@@ -556,7 +560,7 @@ class MinesVariants(BasePlugin):
                     else:
                         _log.warning(f"附图下载失败，状态码：{_response}")
                     break
-        rule_todo: list[dict] = yaml.full_load(open(f"{SELF_PATH}/ruleTodo.yaml", "r", encoding="utf-8"))
+        rule_todo: list[dict] = yaml.full_load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "r", encoding="utf-8"))
         rule_data = None
         for rule in rule_todo:
             if rule["name"] == name:
@@ -589,7 +593,7 @@ class MinesVariants(BasePlugin):
         if not rule_data and not doc:
             await self.send_message(msg, response("categories", "todo_rule_del_empty").format(name))
             return
-        with open(f"{SELF_PATH}/ruleTodo.yaml", "w", encoding="utf-8") as f:
+        with open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "w", encoding="utf-8") as f:
             yaml.dump(rule_todo, f, allow_unicode=True)
         if doc:
             await self.send_message(msg, response("categories", "todo_rule_update").format(name))
@@ -604,22 +608,137 @@ class MinesVariants(BasePlugin):
                 os.remove(_image)
         ALL_RULE.clear()
         self.all_rule()
+        # 开始推送 路径位于f"{SELF_PATH}/fanmade_doc"
+        repo_path = f"{SELF_PATH}\\fanmade_doc\\rule"
+        yaml_rel_path = "ruleTodo.yaml"
+        yaml_full_path = f"{repo_path}/{yaml_rel_path}"
+
+        # 1. 确保该文件已被 Git 追踪（如果从来没 add 过，需要先 add）
+        # 检查状态，如果文件未暂存则 add
+        ret, out, err = await run_command(f'git status --porcelain "{yaml_rel_path}"', cwd=repo_path)
+        if ret == 0 and out.strip():
+            # 有改动（M 或 ??），需要 add
+            await run_command(f'git add "{yaml_rel_path}"', cwd=repo_path)
+        # 2. 提交（如果没有实际改动则 commit 会失败，忽略错误）
+        command = 'git commit -m "'
+        command += ('update' if doc else 'delete') + f' RULE[{name}]"'
+        await run_command(command, cwd=repo_path)
+
+        # 3. 读取上次记录的远程 hash
+        last_hash = self.data.get("last_remote_hash_doc", None)
+
+        # 尝试快速推送（--force-with-lease）
+        push_success = False
+        if last_hash:
+            ret, out, err = await run_command(
+                f'git push --force-with-lease=origin/doc:{last_hash} origin doc',
+                cwd=repo_path
+            )
+            if ret == 0:
+                push_success = True
+            else:
+                # 远程 hash 已变，回退到正常拉取合并
+                await self.send_message(msg, "远程分支已有新提交，正在合并后重试...")
+                # 先拉取并变基
+                await run_command('git pull --rebase origin doc', cwd=repo_path)
+                # 再正常推送
+                ret2, out2, err2 = await run_command('git push origin doc', cwd=repo_path)
+                if ret2 == 0:
+                    push_success = True
+        else:
+            # 没有记录 hash，第一次推送：正常拉取合并再推送
+            await run_command('git pull --rebase origin doc', cwd=repo_path)
+            ret, out, err = await run_command('git push origin doc', cwd=repo_path)
+            print(repo_path)
+            _log.info(f"{ret}, {out}, {err}")
+            if ret == 0:
+                push_success = True
+
+        # 4. 若推送成功，更新记录的远程 hash
+        if push_success:
+            ret, hash_out, err = await run_command('git rev-parse origin/doc', cwd=repo_path)
+            if ret == 0 and hash_out:
+                self.data["last_remote_hash_doc"] = hash_out.strip()
+            await self.send_message(msg, "规则文件已推送到远端仓库。")
+        else:
+            await self.send_message(msg, "推送失败，请手动检查 Git 状态。")
 
     async def pull(self, msg):
         await self.send_message(msg, "开始拉取远程库")
         result = []
-        returncode, stdout, stderr = await run_command(
-            "git pull --recurse-submodules",
-            config_data["porject_path"]
+        proj_path: str = config_data["porject_path"]
+
+        # ================= 1. 主仓库更新 (移除 --recurse-submodules，避免重置子模块) =================
+        _, pre_main, _ = await run_command("git rev-parse HEAD", proj_path)
+        pre_main = pre_main.strip()
+
+        rc, out, err = await run_command("git pull", proj_path)
+        result.append("命令: git pull")
+        result.append(f"退出码: {rc}")
+        if out.strip(): result.append(f"输出:\n{out.strip()}")
+        if err.strip(): result.append(f"错误:\n{err.strip()}")
+
+        _, main_log, _ = await run_command(
+            f'git log {pre_main}..HEAD --pretty=format:"  - %h %s (%an, %ad)" --date=short',
+            proj_path
         )
-        result.extend(["run command: git pull --recurse-submodules", stdout, "exit code: " + str(returncode),
-                       "stderr: \n\n" + stderr])
-        returncode, stdout, stderr = await run_command(
-            "git submodule update --remote",
-            config_data["porject_path"]
-        )
-        result.extend(
-            ["git submodule update --remote", stdout, "exit code: " + str(returncode), "stderr: \n\n" + stderr])
+        if main_log.strip():
+            result.append("主仓库新增提交:")
+            result.append(main_log.strip())
+        else:
+            result.append("主仓库无新增提交")
+
+        # ================= 2. 子模块独立更新与变更捕获 =================
+        _, status, _ = await run_command("git submodule status", proj_path)
+        sub_paths = []
+        for line in status.splitlines():
+            line = line.strip()
+            if line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    sub_paths.append(parts[1])
+
+        # 记录更新前 HEAD
+        pre_sub_shas = {}
+        for sp in sub_paths:
+            sub_cwd = os.path.join(proj_path, sp)
+            if os.path.isdir(os.path.join(sub_cwd, '.git')) or os.path.isfile(os.path.join(sub_cwd, '.git')):
+                _, sha, _ = await run_command("git rev-parse HEAD", sub_cwd)
+                pre_sub_shas[sp] = sha.strip() if sha else ""
+
+        # 执行子模块远程更新
+        rc, out, err = await run_command("git submodule update --remote --recursive", proj_path)
+        result.append("命令: git submodule update --remote --recursive")
+        result.append(f"退出码: {rc}")
+        if out.strip(): result.append(f"输出:\n{out.strip()}")
+        if err.strip(): result.append(f"错误:\n{err.strip()}")
+
+        # 严格对比 SHA，仅输出真实位移
+        result.append("子模块新增提交:")
+        has_change = False
+        for sp in sub_paths:
+            sub_cwd = os.path.join(proj_path, sp)
+            _, new_sha, _ = await run_command("git rev-parse HEAD", sub_cwd)
+            new_sha = new_sha.strip()
+            old_sha = pre_sub_shas.get(sp, "")
+
+            # 核心拦截：SHA 一致、未初始化或长度异常直接跳过
+            if not old_sha or not new_sha or len(new_sha) != 40 or old_sha == new_sha:
+                continue
+
+            _, log, _ = await run_command(
+                f'git log {old_sha}..{new_sha} --pretty=format:"    - %h %s (%an, %ad)" --date=short',
+                sub_cwd
+            )
+            if log.strip():
+                has_change = True
+                result.append(f"{sp}:")
+                result.append(log.strip())
+
+        if not has_change:
+            result.pop(-1)
+            result.append("子模块无变更")
+
         update_all_rules()
         await self.send_group_forward_msg_text(result, msg)
 
@@ -635,8 +754,10 @@ class MinesVariants(BasePlugin):
             stdout = ["run command: " + command, stdout, "exit code: " + str(returncode), "stderr: \n\n" + stderr]
             await self.send_group_forward_msg_text(stdout, msg)
 
-    async def search_rule(self, msg: GroupMessage | PrivateMessage):
-        command = msg.message[0]["data"]["text"].split(" ")
+    async def search_rule(self, msg: GroupMessage | PrivateMessage, command=None):
+        if command is None:
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()
         if len(command) == 1:
             if hasattr(msg, "group_id"):
                 await self.api.post_group_msg(msg.group_id, response("prompts", "rule_query"))
@@ -653,9 +774,64 @@ class MinesVariants(BasePlugin):
         if regular:
             args.remove("/re")
 
+        on_random = 0
+        for arg in args[:]:
+            if not arg.startswith("/rand"):
+                continue
+            _arg = arg.split('/rand')[1]
+            if _arg:
+                if not _arg.isdigit():
+                    continue
+            args.remove(arg)
+            on_random = int(_arg) if _arg else 1
+
         upper = "/u" in args  # upper为True则大小写严格
         if upper:
             args.remove("/u")
+
+        only_R = False
+        if "/r" in args:
+            args.remove("/r")
+            only_R = True
+        if "/R" in args:
+            args.remove("/R")
+            only_R = True
+
+        only_L = False
+        if "/l" in args:
+            args.remove("/l")
+            only_L = True
+        if "/L" in args:
+            args.remove("/L")
+            only_L = True
+
+        only_M = False
+        if "/m" in args:
+            args.remove("/m")
+            only_M = True
+        if "/M" in args:
+            args.remove("/M")
+            only_M = True
+
+        only_T = False
+        if "/t" in args:
+            args.remove("/t")
+            only_T = True
+        if "/T" in args:
+            args.remove("/T")
+            only_T = True
+
+        page = -1
+        for arg in args[:]:
+            if not arg.startswith("/p"):
+                continue
+            _arg = arg.split('/p')[1]
+            if not _arg.isdigit():
+                continue
+            args.remove(arg)
+            page = int(_arg)
+
+        only_switch = only_R or only_L or only_M or only_T
 
         patterns = [
             regex.compile(arg, *[i for i in [regex.IGNORECASE] if not upper])
@@ -665,8 +841,11 @@ class MinesVariants(BasePlugin):
         all_rule = self.all_rule()
 
         result = []
-        if (len(args) == 1) and (not forcibly) and (not regular):
+        if (len(args) == 1) and (not forcibly) and (not regular) and (not on_random):
             for rules_index in range(len(all_rule)):
+                if only_switch:
+                    if not [only_L, only_M, only_R, only_T][rules_index]:
+                        continue
                 rules = all_rule[rules_index]
                 for rule in rules:
                     names = rule["name"]
@@ -691,14 +870,17 @@ class MinesVariants(BasePlugin):
                         return
 
         for rules_index in range(len(all_rule)):
+            if only_switch:
+                if not [only_L, only_M, only_R, only_T][rules_index]:
+                    continue
             rules = all_rule[rules_index]
             for rule in rules:
                 rule_doc: dict = rule["doc"]
                 if type(rule_doc) is dict:
                     rule_doc = rule_doc.copy()
                 if regular and all(
-                        pattern.search(rule_doc["content"], timeout=0.2)
-                        for pattern in patterns
+                    pattern.search(rule_doc["content"], timeout=0.2)
+                    for pattern in patterns
                 ):
                     if rules_index == 3:
                         _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
@@ -724,8 +906,15 @@ class MinesVariants(BasePlugin):
                             rule_doc["content"] += IMAGE_SPLIT + _image
                     result.append(rule_doc)
         result_length = len(result)
-        if result_length > 100:
+        if on_random:
+            result = random.choices(result, k=on_random)
+        if page > -1:
+            result = result[page * 100: (page + 1) * 100]
+        if (page < 0) and ((result_length if on_random == 0 else on_random) > 100):
             result = [result[i:i + 100] for i in range(0, len(result), 100)]
+        if on_random == 1 and not forcibly:
+            await self.send_message(msg, result[0].get("content", "空规则描述"))
+            return
         result = [response("rules", "found_rules").format(result_length, args)] + result
 
         if msg.message_type == "group":
@@ -804,7 +993,7 @@ class MinesVariants(BasePlugin):
                     )
                 }
                 rules_list[-1].append(rule_data)
-        rule_todo_list = yaml.full_load(open(f"{SELF_PATH}/ruleTodo.yaml", "r", encoding="utf-8"))
+        rule_todo_list = yaml.full_load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "r", encoding="utf-8"))
         todo_rule_fmt = response("categories", "todo_rule_fmt")
         rules_list.append([
             {
@@ -1081,9 +1270,10 @@ class MinesVariants(BasePlugin):
                 response("task", "terminated").format(f"[{', '.join([str(i) for i in kill_list])}]")
             )
 
-    async def query_thread(self, msg):
-        raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
-        command: list[str] = raw_message.split()
+    async def query_thread(self, msg, command=None):
+        if command is None:
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()
         forcibly = "/f" in command
         if forcibly:
             command.remove("/f")
@@ -1322,7 +1512,6 @@ class MinesVariants(BasePlugin):
                 raw = f.read()
                 log_text = raw.decode("utf-8", errors="replace")  # 非法字节变 �
         else:
-            print(result)
             log_text = "[EMPTY]"
 
         if state == 0:
