@@ -1,6 +1,6 @@
-/test/
-/data/
-/logs/
+/test/*
+/data/*
+/logs/*
 /plugins/MinesVariants/logs/
 /plugins/MinesVariants/rule.tmp
 /plugins/MinesVariants/
