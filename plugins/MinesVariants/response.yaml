@@ -50,6 +50,12 @@ prompts:
   rule_not_found:
     - "抱歉呢，没有找到匹配的规则...要不要换一个关键词再试试呀？(´•ω•̥`)"
     - "好像没有找到相关的规则呢...我们再试试别的关键词好吗？(。•́︿•̀。)"
+  log_id_format_error:
+    - "跟随的进程ID非数字 示例[#log 1234]"
+  log_format_error:
+    - "获取日志的格式参数错误 后方需要跟随进程ID 示例[#log 1234]"
+  log_unfind_error:
+    - "未找到该日志文件"
 
 # 命令相关
 command:

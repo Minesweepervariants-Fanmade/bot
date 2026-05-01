@@ -22,6 +22,7 @@ from ncatbot.core.api import check_and_log
 from ncatbot.plugin import BasePlugin, CompatibleEnrollment
 from ncatbot.core.message import GroupMessage, PrivateMessage
 from ncatbot.utils import logger
+import json
 
 
 def get_host_ip():
@@ -87,24 +88,15 @@ def response(*key: str) -> str:
 
 def update_all_rules():
     global ALL_RULE
-    output = ""
-    for _ in range(5):
+    request = None
+    for _ in range(6):
         request = Request()
-        request.run_task("list --shell")
-        request.wait_completion(timeout=0)
-        lime_time = time.time() + 10
-        while time.time() < lime_time:
-            time.sleep(0.05)
-            if "hex_end" in request.get_output():
-                break
-        output = request.get_output()
-        if "hex_end" in output:
-            break
-    if "hex_end" not in output:
-        return False
-    output = output.split("hex_start:")[1].split(":hex_end")[0]
-    with open(f"{SELF_PATH}/rule.tmp", 'wb') as f:
-        f.write(bytes.fromhex(output))
+        request.run_task("list --json", mode="BIN")
+        request.wait_completion(timeout=10)
+    result = request.get_output().split("\n")[1]
+    # print(request.get_output(), result)
+    with open(f"{SELF_PATH}/rule.json", 'w', encoding="utf-8") as f:
+        f.write(result)
     _log.info("发起更新规则列表")
     ALL_RULE = []
     return True
@@ -147,11 +139,43 @@ config_data: dict = yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding=
 request_map: dict[int, "Request"] = {}
 HOST_IP = get_host_ip()
 ALL_RULE = []  # {name: [], doc: "..."}, ...
-IMAGE_SPLIT = ''.join([chr(random.randint(33, 126)) for _ in range(50)])
+
+NICK_NAME = response("users", "default_bot", "nickname")
+USER_ID = response("users", "default_bot", "id")
+
+
+def pck(content, image="", user_id=USER_ID, nickname=NICK_NAME) -> list:
+    if type(content) is str:
+        content = [{"type": "text", "data": {"text": content}}]
+        if image and os.path.exists(image):
+            with open(image, "rb") as f:
+                image = "base64://" + base64.b64encode(f.read()).decode('utf-8')
+            content.append({"type": "image", "data": {"file": image}})
+        if os.path.exists(image):
+            print(content)
+        _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": content}}
+        return [_message]
+    elif type(content) is list:
+        _message = []
+        for _text in content:
+            _text = pck(_text)
+            _message.extend(_text)
+        _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": _message}}
+        return [_message]
+    elif type(content) is dict:
+        uid = content.get("uid", USER_ID)
+        name = content.get("name", NICK_NAME)
+        image = content.get("image", "")
+        content = content["content"]
+        __result = pck(content, image=image, user_id=uid, nickname=name)
+        return __result
+    else:
+        return []
 
 
 class Request:
     def __init__(self, max_length=0, _request_id=0):
+        self.mode = None
         self.output_buffer = []
         self.max_length = max_length
         self.request_id = _request_id
@@ -176,14 +200,16 @@ class Request:
         request.output_buffer = self.output_buffer
         return request
 
-    def run_task(self, args: str, host: str = "local") -> None:
+    def run_task(self, args: str, host: str = "local", mode="LINE") -> None:
         """
         启动新线程运行任务（异步执行）
 
         参数:
             args: 传递的参数字符串
             host: 目标主机
+            mode: BIN / LINE
         """
+        self.mode = mode
         self._thread = threading.Thread(
             target=self._run_task, args=(args,), daemon=True
         )
@@ -208,7 +234,6 @@ class Request:
 
             # 持续接收数据
             while not self._should_stop.is_set():
-                data = b''
                 try:
                     # 设置超时以定期检查停止标志
                     client.settimeout(1)
@@ -218,7 +243,13 @@ class Request:
 
                     decoded = data.decode('utf-8', errors='replace')
                     with self._lock:
-                        self.output_buffer.append(decoded)
+                        if self.mode == "BIN":
+                            if len(self.output_buffer) == 0:
+                                self.output_buffer.append(data)
+                            else:
+                                self.output_buffer[0] += data
+                        elif self.mode == "LINE":
+                            self.output_buffer.append(decoded)
 
                     if "Exit Code" in decoded:
                         break
@@ -283,7 +314,10 @@ class Request:
     def get_output(self) -> str:
         """获取当前输出内容（线程安全）"""
         with self._lock:
-            return '\n'.join(self.output_buffer)
+            if self.mode == "LINE":
+                return '\n'.join(self.output_buffer)
+            elif self.mode == "BIN":
+                return self.output_buffer[0].decode('utf-8')
 
     def is_completed(self) -> bool:
         """检查任务是否已完成"""
@@ -401,6 +435,11 @@ class MinesVariants(BasePlugin):
                         else:
                             error_msg = "Failed to load help file, please try again later."
                         await self.api.post_group_msg(msg.group_id, error_msg)
+                case "#log":
+                    if len(command) > 1:
+                        await self.get_log(msg, command[1])
+                    else:
+                        await self.api.post_group_msg(msg.group_id, response("prompts", "log_format_error"))
                 case "#状态" | "#state" | "##":
                     await self.state(msg)
                 case "#终止" | "#kill" | "#k":
@@ -530,6 +569,44 @@ class MinesVariants(BasePlugin):
             # 如果不是数字就是查询规则
             await self.search_rule(msg, [""] + command)
 
+    async def get_log(self, msg: PrivateMessage | GroupMessage, log_id: str = None):
+        if log_id is None:
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()
+            if len(command) < 2:
+                await self.api.post_group_msg(msg.group_id, response("prompts", "log_format_error"))
+                return
+            log_id = command[1]
+            if not log_id.isdigit():
+                await self.api.post_group_msg(msg.group_id, response("prompts", "log_id_format_error"))
+                return
+        log_id = int(log_id)
+        log_path = f"{config_data['log_path']}/{log_id}.log"
+        if not os.path.exists(log_path):
+            await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+            return
+
+        remote_host = "root@10.147.19.3"
+        remote_dir = "/napcat/data"
+        container_file_path = f"/app/data/{log_id}.log"
+
+        # 上传文件到宿主机
+        subprocess.run(
+            ["scp", log_path, f"{remote_host}:{remote_dir}"],
+            stdout=subprocess.DEVNULL,  # 丢弃标准输出
+            stderr=subprocess.DEVNULL   # 丢弃标准错误
+        )
+
+        # 发送文件：使用容器内本地路径
+        if isinstance(msg, GroupMessage):
+            await self.api.post_group_file(msg.group_id, file=container_file_path)
+        elif isinstance(msg, PrivateMessage):
+            # 注意：私聊发送文件的方法名可能是 post_private_file，请根据你的 API 确认
+            await self.api.post_private_file(msg.user_id, file=container_file_path)
+
+        # 清理远程文件
+        subprocess.run(["ssh", remote_host, f"rm {remote_dir}/{log_id}.log"], text=True)
+
     async def send_message(self, msg, message: str, reply=None, image_path=None):
         image = None
         if image_path:
@@ -543,6 +620,7 @@ class MinesVariants(BasePlugin):
 
     async def register_rules(self, msg, name, doc):
         reply = None
+        _response = None
         if msg.message[0]["type"] == "reply":
             reply = msg.message[0]["data"]["id"]
             reply_msgs = await self.api.get_msg(reply)
@@ -550,15 +628,6 @@ class MinesVariants(BasePlugin):
                 if reply_msg_part["type"] == "image":
                     img_url = reply_msg_part["data"]["url"]
                     _response = requests.get(img_url)
-                    if _response.status_code == 200:
-                        # 从 URL 中提取文件名，或自定义
-                        filename = f"{SELF_PATH}\\img\\" + safe_filename(name) + ".png"
-                        os.makedirs(os.path.dirname(filename), exist_ok=True)
-                        with open(filename, "wb") as f:
-                            f.write(_response.content)
-                        _log.info(f"附图保存成功：{filename}")
-                    else:
-                        _log.warning(f"附图下载失败，状态码：{_response}")
                     break
         rule_todo: list[dict] = yaml.full_load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "r", encoding="utf-8"))
         rule_data = None
@@ -593,75 +662,80 @@ class MinesVariants(BasePlugin):
         if not rule_data and not doc:
             await self.send_message(msg, response("categories", "todo_rule_del_empty").format(name))
             return
-        with open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "w", encoding="utf-8") as f:
+
+        # 0. 定义路径
+        repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
+        yaml_path = os.path.join(repo_path, "ruleTodo.yaml")
+        image_dir = os.path.join(repo_path, "image")
+        os.makedirs(image_dir, exist_ok=True)
+        image_name = safe_filename(name) + ".png"
+        image_path = os.path.join(image_dir, image_name)
+
+        # 1. 同步远程（保持已有逻辑）
+        await run_command('git fetch origin doc', cwd=repo_path)
+        ret, _, err = await run_command('git reset --hard origin/doc', cwd=repo_path)
+        if ret != 0:
+            await self.send_message(msg, "同步远程失败")
+            return
+
+        # 2. 处理图片（根据场景决定是添加、替换还是删除）
+        new_image_downloaded = False
+        if doc and _response and _response.status_code == 200:
+            # 更新规则并提供了新图片 → 保存新图片
+            with open(image_path, "wb") as f:
+                f.write(_response.content)
+            new_image_downloaded = True
+            _log.info(f"新图片已保存：{image_path}")
+
+        if doc:
+            if not reply:
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                    await run_command(f'git rm "{image_path}"', cwd=repo_path)
+        else:
+            if os.path.exists(image_path):
+                os.remove(image_path)
+                await run_command(f'git rm "{image_path}"', cwd=repo_path)
+
+        # 3. 修改 YAML 文件
+        with open(yaml_path, "w", encoding="utf-8") as f:
             yaml.dump(rule_todo, f, allow_unicode=True)
+
+        # 4. 发送消息（放在文件修改之后，但不要干扰后续 Git 操作）
         if doc:
             await self.send_message(msg, response("categories", "todo_rule_update").format(name))
-            if not reply:
-                _image = f"{SELF_PATH}\\img\\{safe_filename(name)}.png"
-                if os.path.exists(_image):
-                    os.remove(_image)
         else:
             await self.send_message(msg, response("categories", "todo_rule_del").format(name))
-            _image = f"{SELF_PATH}\\img\\{safe_filename(name)}.png"
-            if os.path.exists(_image):
-                os.remove(_image)
+
+        # 5. 刷新内存规则
         ALL_RULE.clear()
         self.all_rule()
-        # 开始推送 路径位于f"{SELF_PATH}/fanmade_doc"
-        repo_path = f"{SELF_PATH}\\fanmade_doc\\rule"
-        yaml_rel_path = "ruleTodo.yaml"
-        yaml_full_path = f"{repo_path}/{yaml_rel_path}"
 
-        # 1. 确保该文件已被 Git 追踪（如果从来没 add 过，需要先 add）
-        # 检查状态，如果文件未暂存则 add
-        ret, out, err = await run_command(f'git status --porcelain "{yaml_rel_path}"', cwd=repo_path)
-        if ret == 0 and out.strip():
-            # 有改动（M 或 ??），需要 add
-            await run_command(f'git add "{yaml_rel_path}"', cwd=repo_path)
-        # 2. 提交（如果没有实际改动则 commit 会失败，忽略错误）
-        command = 'git commit -m "'
-        command += ('update' if doc else 'delete') + f' RULE[{name}]"'
-        await run_command(command, cwd=repo_path)
+        # 6. Git 添加所有变更（包括新增、修改、删除）
+        #    使用 -A 自动处理所有状态
+        await run_command('git add -A', cwd=repo_path)
 
-        # 3. 读取上次记录的远程 hash
-        last_hash = self.data.get("last_remote_hash_doc", None)
+        # 7. 提交
+        commit_msg = f"User[{msg.sender.nickname}] " + ('update' if doc else 'delete') + f' RULE[{name}]'
+        ret, _, _ = await run_command(f'git commit -m "{commit_msg}"', cwd=repo_path)
+        if ret != 0:
+            await self.send_message(msg, "无内容变更，跳过推送")
+            return
 
-        # 尝试快速推送（--force-with-lease）
-        push_success = False
-        if last_hash:
-            ret, out, err = await run_command(
-                f'git push --force-with-lease=origin/doc:{last_hash} origin doc',
-                cwd=repo_path
-            )
-            if ret == 0:
-                push_success = True
-            else:
-                # 远程 hash 已变，回退到正常拉取合并
-                await self.send_message(msg, "远程分支已有新提交，正在合并后重试...")
-                # 先拉取并变基
-                await run_command('git pull --rebase origin doc', cwd=repo_path)
-                # 再正常推送
-                ret2, out2, err2 = await run_command('git push origin doc', cwd=repo_path)
-                if ret2 == 0:
-                    push_success = True
-        else:
-            # 没有记录 hash，第一次推送：正常拉取合并再推送
+        # 8. 推送（保留你的冲突处理）
+        ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+        if ret != 0:
             await run_command('git pull --rebase origin doc', cwd=repo_path)
-            ret, out, err = await run_command('git push origin doc', cwd=repo_path)
-            print(repo_path)
-            _log.info(f"{ret}, {out}, {err}")
-            if ret == 0:
-                push_success = True
+            ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+            if ret != 0:
+                await self.send_message(msg, "推送失败，请手动检查")
+                return
 
-        # 4. 若推送成功，更新记录的远程 hash
-        if push_success:
-            ret, hash_out, err = await run_command('git rev-parse origin/doc', cwd=repo_path)
-            if ret == 0 and hash_out:
-                self.data["last_remote_hash_doc"] = hash_out.strip()
+        # 9. 更新 hash
+        ret, hash_out, _ = await run_command('git rev-parse origin/doc', cwd=repo_path)
+        if ret == 0 and hash_out:
+            self.data["last_remote_hash_doc"] = hash_out.strip()
             await self.send_message(msg, "规则文件已推送到远端仓库。")
-        else:
-            await self.send_message(msg, "推送失败，请手动检查 Git 状态。")
 
     async def pull(self, msg):
         await self.send_message(msg, "开始拉取远程库")
@@ -853,19 +927,8 @@ class MinesVariants(BasePlugin):
                             (args[0] in names) or
                             (not upper and args[0].lower() in [name.lower() for name in names])
                     ):
-                        doc = rule.get("doc")
-                        image = None
-                        if type(doc) is dict:
-                            doc = doc.get("content")
-                            image = None
-                            if rules_index == 3:
-                                _image = f"{SELF_PATH}\\img\\{safe_filename(names[0])}.png"
-                                if os.path.exists(_image):
-                                    image = _image
-                            else:
-                                _image = get_rule_image(names)
-                                if os.path.exists(_image):
-                                    image = _image
+                        doc = rule.get("doc").get("content")
+                        image = rule.get("doc").get("image")
                         await self.send_message(msg, doc, image_path=image)
                         return
 
@@ -882,28 +945,12 @@ class MinesVariants(BasePlugin):
                     pattern.search(rule_doc["content"], timeout=0.2)
                     for pattern in patterns
                 ):
-                    if rules_index == 3:
-                        _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
-                        if os.path.exists(_image):
-                            rule_doc["content"] += IMAGE_SPLIT + _image
-                    else:
-                        _image = get_rule_image(rule["name"])
-                        if os.path.exists(_image):
-                            rule_doc["content"] += IMAGE_SPLIT + _image
                     result.append(rule_doc)
                 elif not regular and all(
                         (pattern in rule_doc["content"]) if upper else
                         (pattern.lower() in rule_doc["content"].lower())
                         for pattern in args
                 ):
-                    if rules_index == 3:
-                        _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
-                        if os.path.exists(_image):
-                            rule_doc["content"] += IMAGE_SPLIT + _image
-                    else:
-                        _image = get_rule_image(rule["name"])
-                        if os.path.exists(_image):
-                            rule_doc["content"] += IMAGE_SPLIT + _image
                     result.append(rule_doc)
         result_length = len(result)
         if on_random:
@@ -931,29 +978,20 @@ class MinesVariants(BasePlugin):
         all_rule: list[list[str | dict]] = []
         for index in range(3):
             all_rule.append([[
-                                 response("categories", "left_rules_title"),
-                                 response("categories", "middle_rules_title"),
-                                 response("categories", "right_rules_title"),
-                             ][index]])
+                response("categories", "left_rules_title"),
+                response("categories", "middle_rules_title"),
+                response("categories", "right_rules_title"),
+            ][index]])
             for rule in ALL_RULE[index]:
-                rule_doc: dict = rule["doc"].copy()
+                rule_doc: dict = rule["doc"]
                 all_rule[-1].append(rule_doc)
-                _image = get_rule_image(rule["name"])
-                if os.path.exists(_image):
-                    if type(rule_doc) is dict:
-                        rule_doc["content"] += IMAGE_SPLIT + _image
-                    elif type(all_rule[-1][-1]) is str:
-                        rule_doc += IMAGE_SPLIT + _image
 
         all_rule += [response("categories", "todo_rules_title")]
 
         result = []
 
         for rule in ALL_RULE[3]:
-            result.append(rule["doc"].copy())
-            _image = f"{SELF_PATH}\\img\\{safe_filename(rule["name"][0])}.png"
-            if os.path.exists(_image):
-                result[-1]["content"] += IMAGE_SPLIT + _image
+            result.append(rule["doc"])
         if len(result) > 100:
             result = [result[i:i + 100] for i in range(0, len(result), 100)]
         all_rule += result
@@ -970,81 +1008,60 @@ class MinesVariants(BasePlugin):
         global ALL_RULE
         if ALL_RULE:
             return ALL_RULE
-        with open(f"{SELF_PATH}/rule.tmp", "rb") as f:
-            output = f.read()
-        output = output.decode("utf-8").replace("\r", "")
-        split_symbol, split_name_symbol, output = output[:50], output[50:60], output[60:]
-        output = output.split(split_symbol * 2)[:-1]
+        with open(f"{SELF_PATH}/rule.json", "r", encoding="utf-8") as f:
+            rule_json: dict = json.load(f)
+
         rules_list: list[list] = []
-        for i in range(len(output)):
+        for key in rule_json:
             rules_list.append([])
-            for rule in output[i].split(split_symbol):
-                rule_parts = rule.split(split_name_symbol)
+            for rule_dict in rule_json[key]:
+                author = rule_dict["author"]
+                if rule_dict["image"]:
+                    image = os.path.join(config_data["image_path"], rule_dict["image"])
+                else:
+                    image = ""
                 rule_data = {
-                    "name": rule_parts[:-3],
+                    "name": [rule_dict["id"]] + list(rule_dict["name"].values()),
                     "doc": {
-                        "content": rule_parts[-1],
-                        "uid": rule_parts[-2] if rule_parts[-2] else None,
-                        "name": rule_parts[-3] if rule_parts[-3] else None
+                        "content": "",
+                        "uid": author["id"] if author["id"] else None,
+                        "name": author["name"] if author["name"] else None,
+                        "image": image if os.path.exists(image) else "",
                     },
                     "author": (
-                        rule_parts[-3] if rule_parts[-2] else None,
-                        rule_parts[-2] if rule_parts[-3] else None
+                        author["id"] if author["id"] else None,
+                        author["name"] if author["name"] else None
                     )
                 }
+                content = f'[{rule_dict["id"]}]'
+                content += f'{rule_dict["name"].get("zh_CN", rule_dict["name"].get("default", ""))}'
+                content += f': {rule_dict["doc"].get("zh_CN", rule_dict["doc"].get("default", "空描述"))}'
+                rule_data["doc"]["content"] = content
                 rules_list[-1].append(rule_data)
         rule_todo_list = yaml.full_load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "r", encoding="utf-8"))
         todo_rule_fmt = response("categories", "todo_rule_fmt")
-        rules_list.append([
-            {
-                "name": [data["name"]],
-                "author": (data["author_name"], data["author_uid"]),
-                "doc": {
-                    "content": todo_rule_fmt.format(
-                        data["name"], data["doc"], data["author_name"], data["author_uid"],
-                        time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data["time"]))
-                    ), "name": data["author_name"], "uid": data["author_uid"]
+        rules_list.append([])
+        for data in rule_todo_list:
+            image = f"{SELF_PATH}\\fanmade_doc\\rule\\image\\{safe_filename(data["name"])}.png"
+            rules_list[-1].append(
+                {
+                    "name": [data["name"]],
+                    "author": (data["author_name"], data["author_uid"]),
+                    "doc": {
+                        "content": todo_rule_fmt.format(
+                            data["name"], data["doc"], data["author_name"], data["author_uid"],
+                            time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data["time"]))
+                        ),
+                        "name": data["author_name"],
+                        "uid": data["author_uid"],
+                        "image": image if os.path.exists(image) else ""
+                    }
                 }
-            }
-            for data in rule_todo_list
-        ])
+            )
         ALL_RULE = rules_list
         return ALL_RULE
 
     async def send_private_forward_msg_text(self, text, msg: PrivateMessage, news=None, source=None, summary=None):
-        NICK_NAME = response("users", "default_bot", "nickname")
-        USER_ID = response("users", "default_bot", "id")
-
-        def pck(content, user_id=USER_ID, nickname=NICK_NAME) -> list:
-            if type(content) is str:
-                image = ""
-                if IMAGE_SPLIT in content:
-                    content, image_file_path = content.rsplit(IMAGE_SPLIT, 1)
-                    if image_file_path:
-                        with open(image_file_path, "rb") as f:
-                            image = "base64://" + base64.b64encode(f.read()).decode('utf-8')
-                content = [{"type": "text", "data": {"text": content}}]
-                if image:
-                    content.append({"type": "image", "data": {"file": image}})
-                content = [{"type": "text", "data": {"text": content}}]
-                _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": content}}
-                return [_message]
-            elif type(content) is list:
-                _message = []
-                for _text in content:
-                    _text = pck(_text)
-                    _message.extend(_text)
-                _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": _message}}
-                return [_message]
-            elif type(content) is dict:
-                uid = content.get("uid", USER_ID)
-                name = content.get("name", NICK_NAME)
-                content = content["content"]
-                __result = pck(content, user_id=uid, nickname=name)
-                return __result
-            else:
-                return []
-
         if type(text) is str:
             text = [text]
         message = pck(text)
@@ -1061,38 +1078,6 @@ class MinesVariants(BasePlugin):
         return check_and_log(await self.api._http.post("/send_private_forward_msg", json=params))
 
     async def send_group_forward_msg_text(self, text, msg: GroupMessage, news=None, source=None, summary=None):
-        NICK_NAME = response("users", "default_bot", "nickname")
-        USER_ID = response("users", "default_bot", "id")
-
-        def pck(content, user_id=USER_ID, nickname=NICK_NAME) -> list:
-            if type(content) is str:
-                image = ""
-                if IMAGE_SPLIT in content:
-                    content, image_file_path = content.rsplit(IMAGE_SPLIT, 1)
-                    if image_file_path:
-                        with open(image_file_path, "rb") as f:
-                            image = "base64://" + base64.b64encode(f.read()).decode('utf-8')
-                content = [{"type": "text", "data": {"text": content}}]
-                if image:
-                    content.append({"type": "image", "data": {"file": image}})
-                _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": content}}
-                return [_message]
-            elif type(content) is list:
-                _message = []
-                for _text in content:
-                    _text = pck(_text)
-                    _message.extend(_text)
-                _message = {"type": "node", "data": {"user_id": user_id, "nickname": nickname, "content": _message}}
-                return [_message]
-            elif type(content) is dict:
-                uid = content.get("uid", USER_ID)
-                name = content.get("name", NICK_NAME)
-                content = content["content"]
-                __result = pck(content, user_id=uid, nickname=name)
-                return __result
-            else:
-                return []
-
         if type(text) is str:
             text = [text]
         message = pck(text)
@@ -1341,10 +1326,8 @@ class MinesVariants(BasePlugin):
                 await self.api.post_group_msg(msg.group_id, reply_text)
                 return
 
-        # print(result)
         reply_text = log_text + "\n" + "\n".join([line for line in result.split("\n")][::-1][:10][::-1])
         result = [reply_text[i:i + str_length] for i in range(0, len(reply_text), str_length)][::-1][:msg_length][::-1]
-        # print(result)
         await self.send_group_forward_msg_text(result, msg=msg)
         return
 
@@ -1568,8 +1551,6 @@ class MinesVariants(BasePlugin):
                 response_text = response("task", "failed").format(request.request_id)
                 if "[STDERR EMPTY]" not in result:
                     traceback = (result.split("[STDERR]:")[-1].rsplit(":[STDERR]", 1)[0]).split("\n")
-                    # print(result)
-                    # print(traceback)
                     response_text += "\n" + [i for i in traceback if i][::-1][0]
                 await self.api.post_group_msg(
                     msg.group_id,
@@ -1601,35 +1582,3 @@ class MinesVariants(BasePlugin):
             )
 
         del request_map[request.request_id]
-
-# if __name__ == '__main__':
-#     output = ""
-#     for _ in range(5):
-#         request = Request()
-#         request.run_task("list --shell")
-#         request.wait_completion(timeout=0)
-#         lime_time = time.time() + 2.5
-#         while time.time() < lime_time:
-#             time.sleep(0.05)
-#             if "hex_end" in request.get_output():
-#                 break
-#         output = request.get_output()
-#         if "hex_end" in output:
-#             break
-#     output = output.split("hex_start:")[1].split(":hex_end")[0]
-#     output = bytes.fromhex(output)
-#     output = output.decode("utf-8").replace("\r", "")
-#     split_symbol, output = output[:50], output[50:]
-#     output = output.split(split_symbol * 2)[:-1]
-#     rules_list: list[list] = []
-#     for i in range(len(output)):
-#         print(rules_list)
-#         rules: list[str] = output[i].split(split_symbol)
-#         print(rules)
-#         rules = [[
-#                      response("categories", "left_rules_title"),
-#                      response("categories", "middle_rules_title"),
-#                      response("categories", "right_rules_title")
-#                  ][i]] + rules
-#         rules_list.append(rules)
-#     print(rules_list)
