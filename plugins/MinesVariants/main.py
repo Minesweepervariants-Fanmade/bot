@@ -631,20 +631,20 @@ class MinesVariants(BasePlugin):
                     break
         rule_todo: list[dict] = yaml.full_load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "r", encoding="utf-8"))
         rule_data = None
+        _doc = ""
         for rule in rule_todo:
             if rule["name"] == name:
                 if (
-                        int(rule["author_uid"]) != int(msg.user_id) and
-                        msg.user_id not in self.data["admin"]
+                    int(rule["author_uid"]) != int(msg.user_id) and
+                    msg.user_id not in self.data["admin"]
                 ):
                     await self.send_message(msg, response("categories", "todo_rule_unauthor"))
                     return
                 else:
-                    if doc:
-                        rule_data = rule
-                        break
-                    rule_data = True
-                    rule_todo.remove(rule)
+                    rule_data = rule
+                    _doc = rule_data["doc"]
+                    if not doc:
+                        rule_todo.remove(rule)
                     break
         if doc:
             if rule_data is None:
@@ -703,7 +703,10 @@ class MinesVariants(BasePlugin):
 
         # 4. 发送消息（放在文件修改之后，但不要干扰后续 Git 操作）
         if doc:
-            await self.send_message(msg, response("categories", "todo_rule_update").format(name))
+            if _doc:
+                await self.send_message(msg, response("categories", "todo_rule_update").format(name, _doc))
+            else:
+                await self.send_message(msg, response("categories", "todo_rule_create").format(name))
         else:
             await self.send_message(msg, response("categories", "todo_rule_del").format(name))
 
@@ -1021,7 +1024,11 @@ class MinesVariants(BasePlugin):
                 else:
                     image = ""
                 rule_data = {
-                    "name": [rule_dict["id"]] + list(rule_dict["name"].values()),
+                    "name": (
+                        [rule_dict["id"]] +
+                        list(rule_dict["name"].values()) +
+                        list(rule_dict.get("aliases", []))
+                    ),
                     "doc": {
                         "content": "",
                         "uid": author["id"] if author["id"] else None,

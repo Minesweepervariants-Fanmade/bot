@@ -151,7 +151,8 @@ categories:
     作者:{} ({})
     最后编辑时间:{}
   todo_rule_unauthor: "非规则作者不可更改内容"
-  todo_rule_update: "已更新规则[{}]"
+  todo_rule_update: "已更新规则[{}]\n原描述:\n{}"
+  todo_rule_create: "已创建规则[{}]"
   todo_rule_del: "已删除规则[{}]"
   todo_rule_del_empty: "规则[{}]不存在,无法删除"
 
