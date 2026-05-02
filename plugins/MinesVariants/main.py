@@ -866,6 +866,10 @@ class MinesVariants(BasePlugin):
         if upper:
             args.remove("/u")
 
+        only_name = "/n" in args  # upper为True则大小写严格
+        if upper:
+            args.remove("/n")
+
         only_R = False
         if "/r" in args:
             args.remove("/r")
@@ -942,16 +946,17 @@ class MinesVariants(BasePlugin):
             rules = all_rule[rules_index]
             for rule in rules:
                 rule_doc: dict = rule["doc"]
+                content = ''.join(rule["name"]) + ("" if only_name else rule_doc["content"])
                 if type(rule_doc) is dict:
                     rule_doc = rule_doc.copy()
                 if regular and all(
-                    pattern.search(rule_doc["content"], timeout=0.2)
+                    pattern.search(content, timeout=0.2)
                     for pattern in patterns
                 ):
                     result.append(rule_doc)
                 elif not regular and all(
-                        (pattern in rule_doc["content"]) if upper else
-                        (pattern.lower() in rule_doc["content"].lower())
+                        (pattern in content) if upper else
+                        (pattern.lower() in content.lower())
                         for pattern in args
                 ):
                     result.append(rule_doc)
