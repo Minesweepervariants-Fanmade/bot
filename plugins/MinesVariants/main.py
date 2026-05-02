@@ -668,7 +668,7 @@ class MinesVariants(BasePlugin):
         yaml_path = os.path.join(repo_path, "ruleTodo.yaml")
         image_dir = os.path.join(repo_path, "image")
         os.makedirs(image_dir, exist_ok=True)
-        image_name = safe_filename(name) + ".png"
+        image_name = get_rule_image(name) + ".png"
         image_path = os.path.join(image_dir, image_name)
 
         # 1. 同步远程（保持已有逻辑）
@@ -679,23 +679,19 @@ class MinesVariants(BasePlugin):
             return
 
         # 2. 处理图片（根据场景决定是添加、替换还是删除）
-        new_image_downloaded = False
         if doc and _response and _response.status_code == 200:
             # 更新规则并提供了新图片 → 保存新图片
             with open(image_path, "wb") as f:
                 f.write(_response.content)
-            new_image_downloaded = True
             _log.info(f"新图片已保存：{image_path}")
+            rule_data["image"] = image_name
 
-        if doc:
-            if not reply:
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-                    await run_command(f'git rm "{image_path}"', cwd=repo_path)
-        else:
+        if (doc and not reply) or (not doc):
             if os.path.exists(image_path):
                 os.remove(image_path)
                 await run_command(f'git rm "{image_path}"', cwd=repo_path)
+            if "image" in rule_data:
+                del rule_data["image"]
 
         # 3. 修改 YAML 文件
         with open(yaml_path, "w", encoding="utf-8") as f:
@@ -1054,7 +1050,7 @@ class MinesVariants(BasePlugin):
         todo_rule_fmt = response("categories", "todo_rule_fmt")
         rules_list.append([])
         for data in rule_todo_list:
-            image = f"{SELF_PATH}\\fanmade_doc\\rule\\image\\{safe_filename(data["name"])}.png"
+            image = f"{SELF_PATH}\\fanmade_doc\\rule\\image\\{get_rule_image(data["name"])}.png"
             rules_list[-1].append(
                 {
                     "name": [data["name"]],
