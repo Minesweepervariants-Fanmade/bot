@@ -112,13 +112,7 @@ def get_system_stats(interval=None) -> str:
     return f"CPU: {cpu_percent}% | MEM: {mem.percent}% ({mem.used // (1024 ** 2)}MB/{mem.total // (1024 ** 2)}MB)"
 
 
-def safe_filename(s):
-    s = re.sub(r'[_\\/:*?"<>|]', lambda m: '__' if m.group() == '_' else f'_{ord(m.group()):02X}', s)
-    return s
-
-
-def get_rule_image(names: list[str]):
-    file_name = "_".join(names)
+def get_rule_image(file_name: str):
     file_name = file_name.replace("-", "--")
     file_name = file_name.replace('?', '-q')
     file_name = file_name.replace('*', '-a')
@@ -127,7 +121,7 @@ def get_rule_image(names: list[str]):
     file_name = file_name.replace('/', '-s')
     file_name = file_name.replace('\\', '-b')
     file_name = file_name.replace(':', '-c')
-    return config_data["image_path"] + "\\" + file_name + ".png"
+    return file_name
 
 
 SELF_PATH = Path(__file__).parent.__str__()
@@ -610,8 +604,9 @@ class MinesVariants(BasePlugin):
     async def send_message(self, msg, message: str, reply=None, image_path=None):
         image = None
         if image_path:
-            with open(image_path, "rb") as f:
-                image = "base64://" + base64.b64encode(f.read()).decode('utf-8')
+            if os.path.exists(image_path):
+                with open(image_path, "rb") as f:
+                    image = "base64://" + base64.b64encode(f.read()).decode('utf-8')
         if hasattr(msg, "group_id"):
             await self.api.post_group_msg(msg.group_id, message, reply=reply, image=image)
         else:
@@ -683,15 +678,18 @@ class MinesVariants(BasePlugin):
             # 更新规则并提供了新图片 → 保存新图片
             with open(image_path, "wb") as f:
                 f.write(_response.content)
-            _log.info(f"新图片已保存：{image_path}")
+            _log.info(f"新图片已保存: {image_path}")
             rule_data["image"] = image_name
+            await run_command(f'git add "{image_path}"', cwd=repo_path)
 
         if (doc and not reply) or (not doc):
             if os.path.exists(image_path):
                 os.remove(image_path)
-                await run_command(f'git rm "{image_path}"', cwd=repo_path)
-            if "image" in rule_data:
-                del rule_data["image"]
+                await run_command(f'git add "{image_path}"', cwd=repo_path)
+                _log.info(f"图片已移除: {image_path}")
+                # 注意：此时删除操作已暂存，但仍需 commit
+                if "image" in rule_data:
+                    del rule_data["image"]
 
         # 3. 修改 YAML 文件
         with open(yaml_path, "w", encoding="utf-8") as f:
@@ -958,13 +956,16 @@ class MinesVariants(BasePlugin):
                     result.append(rule_doc)
         result_length = len(result)
         if on_random:
-            result = random.choices(result, k=on_random)
+            result = random.choices(result, k=min(on_random, len(result)))
         if page > -1:
             result = result[page * 100: (page + 1) * 100]
         if (page < 0) and ((result_length if on_random == 0 else on_random) > 100):
             result = [result[i:i + 100] for i in range(0, len(result), 100)]
-        if on_random == 1 and not forcibly:
-            await self.send_message(msg, result[0].get("content", "空规则描述"))
+        if on_random == 1 and not forcibly and len(result) > 0:
+            await self.send_message(
+                msg, result[0].get("content", "空规则描述"),
+                image_path=result[0].get("image", None)
+            )
             return
         result = [response("rules", "found_rules").format(result_length, args)] + result
 
@@ -1050,7 +1051,9 @@ class MinesVariants(BasePlugin):
         todo_rule_fmt = response("categories", "todo_rule_fmt")
         rules_list.append([])
         for data in rule_todo_list:
-            image = f"{SELF_PATH}\\fanmade_doc\\rule\\image\\{get_rule_image(data["name"])}.png"
+            image = ""
+            if "image" in data:
+                image = f"{SELF_PATH}\\fanmade_doc\\rule\\image\\" + data.get('image')
             rules_list[-1].append(
                 {
                     "name": [data["name"]],
