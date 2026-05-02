@@ -866,8 +866,8 @@ class MinesVariants(BasePlugin):
         if upper:
             args.remove("/u")
 
-        only_name = "/n" in args  # upper为True则大小写严格
-        if upper:
+        only_name = "/n" in args  # 仅搜索名称
+        if only_name:
             args.remove("/n")
 
         only_R = False
