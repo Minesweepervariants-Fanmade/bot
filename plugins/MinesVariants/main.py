@@ -1036,6 +1036,11 @@ class MinesVariants(BasePlugin):
                     image = os.path.join(config_data["image_path"], rule_dict["image"])
                 else:
                     image = ""
+                on_user = (
+                    (author["id"] is not None) and
+                    (author["id"]) and
+                    (int(author["id"]) > 0)
+                )
                 rule_data = {
                     "name": (
                         [rule_dict["id"]] +
@@ -1044,13 +1049,13 @@ class MinesVariants(BasePlugin):
                     ),
                     "doc": {
                         "content": "",
-                        "uid": author["id"] if author["id"] else None,
-                        "name": author["name"] if author["name"] else None,
+                        "uid": author["id"] if on_user else None,
+                        "name": author["name"] if on_user else None,
                         "image": image if os.path.exists(image) else "",
                     },
                     "author": (
-                        author["id"] if author["id"] else None,
-                        author["name"] if author["name"] else None
+                        author["id"] if on_user else None,
+                        author["name"] if on_user else None
                     )
                 }
                 content = f'[{rule_dict["id"]}]'
@@ -1065,21 +1070,27 @@ class MinesVariants(BasePlugin):
             image = ""
             if "image" in data:
                 image = f"{SELF_PATH}\\fanmade_doc\\rule\\image\\" + data.get('image')
+            on_user = (data["author_uid"] is not None) and (int(data["author_uid"]) > 0)
+            print(data, on_user)
             rules_list[-1].append(
                 {
                     "name": [data["name"]],
-                    "author": (data["author_name"], data["author_uid"]),
+                    "author": (
+                        data["author_name"] if on_user else None,
+                        data["author_uid"] if on_user else None
+                    ),
                     "doc": {
                         "content": todo_rule_fmt.format(
                             data["name"], data["doc"], data["author_name"], data["author_uid"],
                             time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data["time"]))
                         ),
-                        "name": data["author_name"] if data["author_name"] else None,
-                        "uid": data["author_uid"] if data["author_uid"] else None,
+                        "name": data["author_name"] if on_user else None,
+                        "uid": data["author_uid"] if on_user else None,
                         "image": image if os.path.exists(image) else ""
                     }
                 }
             )
+        # print(rules_list)
         ALL_RULE = rules_list
         return ALL_RULE
 
