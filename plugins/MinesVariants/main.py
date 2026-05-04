@@ -328,9 +328,12 @@ class MinesVariants(BasePlugin):
 
     @bot.private_event()
     async def on_private_event(self, msg: PrivateMessage):
+        print("[PRI]", msg.user_id, ":", msg.raw_message[:20].replace("\n", ""), end="\r")
         try:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
+            if not command:
+                return
             match command[0]:
                 case "#生成" | "#sc" | "#summon" | "#run":
                     self.data["id"] += 1
@@ -349,6 +352,11 @@ class MinesVariants(BasePlugin):
                     await self.rule_list(msg)
                 case "#查询规则" | "#cxr":
                     await self.search_rule(msg)
+                case "#log":
+                    if len(command) > 1:
+                        await self.get_log(msg, command[1])
+                    else:
+                        await self.api.post_private_msg(msg.user_id, response("prompts", "log_format_error"))
                 case "#查询" | "#cx":
                     await self.query_thread(msg)
                 case "#帮助" | "#help" | "#?":
@@ -366,6 +374,11 @@ class MinesVariants(BasePlugin):
                         await self.api.post_private_msg(msg.user_id, response("categories", "update_end"))
                     else:
                         await self.api.post_private_msg(msg.user_id, response("categories", "update_fail"))
+                case "#":  # 综合
+                    await self.shape(msg)
+                    return
+                case _:
+                    await self.shape(msg, raw_message[1:].split())
             # _log.warning(f"Received empty or invalid command: {msg.raw_message}")
         except Exception as e:
             _log.error(f"Error in on_private_event: {e}", exc_info=True)
@@ -379,7 +392,7 @@ class MinesVariants(BasePlugin):
 
     @bot.group_event()
     async def on_group_event(self, msg: GroupMessage):
-        print(msg.group_id, ":", msg.raw_message[:20].replace("\n", ""), end="\r")
+        print("[GUP]", msg.group_id, ":", msg.raw_message[:20].replace("\n", ""), end="\r")
         try:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
@@ -511,8 +524,6 @@ class MinesVariants(BasePlugin):
                     message_id = msg.message[0]["data"]["id"]
                     await self.api.delete_msg(message_id)
                     await self.api.delete_msg(msg.message_id)
-                case '#hyw':
-                    await self.api.post_group_msg(msg.group_id, response("hyw"))
                 case "#":  # 综合
                     await self.shape(msg)
                     return
@@ -1266,7 +1277,7 @@ class MinesVariants(BasePlugin):
                 response("task", "terminated").format(f"[{', '.join([str(i) for i in kill_list])}]")
             )
 
-    async def query_thread(self, msg, command=None):
+    async def query_thread(self, msg: PrivateMessage | GroupMessage, command=None):
         if command is None:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
@@ -1274,10 +1285,7 @@ class MinesVariants(BasePlugin):
         if forcibly:
             command.remove("/f")
         if len(command) == 1:
-            await self.api.post_group_msg(
-                msg.group_id,
-                response("task", "unid")
-            )
+            await self.send_message(msg, response("task", "unid"))
             return
         if not command[1].isdigit():
             await self.search_rule(msg)
@@ -1298,10 +1306,7 @@ class MinesVariants(BasePlugin):
             msg_length = 12000 // str_length
         query_id = int(command[1])
         if query_id not in request_map:
-            await self.api.post_group_msg(
-                msg.group_id,
-                response("task", "not_found")
-            )
+            await self.send_message(msg, response("task", "not_found"))
             return
         result = request_map[query_id].get_output()
         log_file_name = config_data["log_path"] + "\\" + str(query_id) + ".log"
@@ -1318,7 +1323,7 @@ class MinesVariants(BasePlugin):
         if not forcibly:
             reply_text = ""
             if "生成用时" in log_text:
-                await self.api.post_group_msg(msg.group_id, response("progress", "saving_image"))
+                await self.send_message(msg, response("progress", "saving_image"))
                 return
             if "尝试第" in log_text and "次minesweepervariants" in log_text:
                 try_index = int(log_text.rsplit("尝试第", 1)[1].rsplit("次minesweepervariants")[0])
@@ -1329,17 +1334,19 @@ class MinesVariants(BasePlugin):
                 if line.strip() == "":
                     continue
                 if "进度" in line:
-                    await self.api.post_group_msg(
-                        msg.group_id, ((reply_text + "\n") if reply_text else "") + line
-                    )
+                    result = ((reply_text + "\n") if reply_text else "") + line
+                    await self.send_message(msg, result)
                     return
             if reply_text:
-                await self.api.post_group_msg(msg.group_id, reply_text)
+                await self.send_message(msg, reply_text)
                 return
 
         reply_text = log_text + "\n" + "\n".join([line for line in result.split("\n")][::-1][:10][::-1])
         result = [reply_text[i:i + str_length] for i in range(0, len(reply_text), str_length)][::-1][:msg_length][::-1]
-        await self.send_group_forward_msg_text(result, msg=msg)
+        if type(msg) is GroupMessage:
+            await self.send_group_forward_msg_text(result, msg=msg)
+        elif type(msg) is PrivateMessage:
+            await self.send_private_forward_msg_text(result, msg=msg)
         return
 
     def _query_thread(self, query_id):
