@@ -635,7 +635,7 @@ class MinesVariants(BasePlugin):
                     img_url = reply_msg_part["data"]["url"]
                     _response = requests.get(img_url)
                     break
-        rule_todo: list[dict] = yaml.full_load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "r", encoding="utf-8"))
+        rule_todo: list[dict] = json.load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.json", "r", encoding="utf-8"))
         rule_data = None
         _doc = ""
         for rule in rule_todo:
@@ -671,7 +671,7 @@ class MinesVariants(BasePlugin):
 
         # 0. 定义路径
         repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
-        yaml_path = os.path.join(repo_path, "ruleTodo.yaml")
+        json_path = os.path.join(repo_path, "ruleTodo.json")
         image_dir = os.path.join(repo_path, "image")
         os.makedirs(image_dir, exist_ok=True)
         image_name = get_rule_image(name) + ".png"
@@ -703,8 +703,8 @@ class MinesVariants(BasePlugin):
                     del rule_data["image"]
 
         # 3. 修改 YAML 文件
-        with open(yaml_path, "w", encoding="utf-8") as f:
-            yaml.dump(rule_todo, f, allow_unicode=True)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(rule_todo, f, ensure_ascii=True)
 
         # 4. 发送消息（放在文件修改之后，但不要干扰后续 Git 操作）
         if doc:
@@ -1058,7 +1058,7 @@ class MinesVariants(BasePlugin):
                 content += f': {rule_dict["doc"].get("zh_CN", rule_dict["doc"].get("default", "空描述"))}'
                 rule_data["doc"]["content"] = content
                 rules_list[-1].append(rule_data)
-        rule_todo_list = yaml.full_load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.yaml", "r", encoding="utf-8"))
+        rule_todo_list = json.load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.json", "r", encoding="utf-8"))
         todo_rule_fmt = response("categories", "todo_rule_fmt")
         rules_list.append([])
         for data in rule_todo_list:
@@ -1074,8 +1074,8 @@ class MinesVariants(BasePlugin):
                             data["name"], data["doc"], data["author_name"], data["author_uid"],
                             time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(data["time"]))
                         ),
-                        "name": data["author_name"],
-                        "uid": data["author_uid"],
+                        "name": data["author_name"] if data["author_name"] else None,
+                        "uid": data["author_uid"] if data["author_uid"] else None,
                         "image": image if os.path.exists(image) else ""
                     }
                 }
