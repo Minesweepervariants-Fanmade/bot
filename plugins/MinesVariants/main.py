@@ -1071,7 +1071,6 @@ class MinesVariants(BasePlugin):
             if "image" in data:
                 image = f"{SELF_PATH}\\fanmade_doc\\rule\\image\\" + data.get('image')
             on_user = (data["author_uid"] is not None) and (int(data["author_uid"]) > 0)
-            print(data, on_user)
             rules_list[-1].append(
                 {
                     "name": [data["name"]],
