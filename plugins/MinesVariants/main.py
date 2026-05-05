@@ -3,6 +3,7 @@ import os
 import pathlib
 import random
 import re
+import string
 import subprocess
 import time
 from pathlib import Path
@@ -133,6 +134,7 @@ config_data: dict = yaml.full_load(open(f"{SELF_PATH}/data.yaml", "r", encoding=
 request_map: dict[int, "Request"] = {}
 HOST_IP = get_host_ip()
 ALL_RULE = []  # {name: [], doc: "..."}, ...
+MAX_LENGTH = 7000
 
 NICK_NAME = response("users", "default_bot", "nickname")
 USER_ID = response("users", "default_bot", "id")
@@ -165,6 +167,25 @@ def pck(content, image="", user_id=USER_ID, nickname=NICK_NAME) -> list:
         return __result
     else:
         return []
+
+
+def split_by_content_length(items, max_len=MAX_LENGTH):
+    chunks = []
+    cur_chunk = []
+    cur_len = 0
+    for item in items:
+        item_len = len(item.get("content", str(item)))
+        # 如果当前块节点数已达上限，或加上当前item后长度超限，则切块
+        if cur_len + item_len > max_len and cur_chunk:
+            chunks.append(cur_chunk)
+            cur_chunk = [item]
+            cur_len = item_len
+        else:
+            cur_chunk.append(item)
+            cur_len += item_len
+    if cur_chunk:
+        chunks.append(cur_chunk)
+    return chunks
 
 
 class Request:
@@ -1050,27 +1071,55 @@ class MinesVariants(BasePlugin):
             rules = all_rule[rules_index]
             for rule in rules:
                 rule_doc: dict = rule["doc"]
-                content = ''.join(rule["name"]) + ("" if only_name else rule_doc["content"])
-                if type(rule_doc) is dict:
-                    rule_doc = rule_doc.copy()
-                if regular and all(
-                    pattern.search(content, timeout=0.2)
-                    for pattern in patterns
-                ):
-                    result.append(rule_doc)
-                elif not regular and all(
-                        (pattern in content) if upper else
-                        (pattern.lower() in content.lower())
-                        for pattern in args
-                ):
-                    result.append(rule_doc)
+                content = rule_doc["content"]
+                if only_name:
+                    if type(rule_doc) is dict:
+                        rule_doc = rule_doc.copy()
+                    if regular and all(
+                        any(
+                            pattern.search(name, timeout=0.2)
+                            for name in rule["name"]
+                        )
+                        for pattern in patterns
+                    ):
+                        result.append(rule_doc)
+                    elif not regular and all(
+
+                            any(
+                                pattern in name
+                                for name in rule["name"]
+                            ) if upper else any(
+                                pattern.lower() in name.lower()
+                                for name in rule["name"]
+                            )
+                            for pattern in args
+                    ):
+                        result.append(rule_doc)
+                else:
+                    if type(rule_doc) is dict:
+                        rule_doc = rule_doc.copy()
+                    if regular and all(
+                        pattern.search(content, timeout=0.2)
+                        for pattern in patterns
+                    ):
+                        result.append(rule_doc)
+                    elif not regular and all(
+                            (pattern in content) if upper else
+                            (pattern.lower() in content.lower())
+                            for pattern in args
+                    ):
+                        result.append(rule_doc)
         result_length = len(result)
+        page_length = 75
         if on_random:
             result = random.choices(result, k=min(on_random, len(result)))
         if page > -1:
-            result = result[page * 100: (page + 1) * 100]
+            result = result[page * page_length: (page + 1) * page_length]
         if (page < 0) and ((result_length if on_random == 0 else on_random) > 100):
-            result = [result[i:i + 100] for i in range(0, len(result), 100)]
+            # result = [result[i:i + page_length] for i in range(0, len(result), page_length)]
+            result = split_by_content_length(result)
+            if len(result) == 1:
+                result = result[0]
         if on_random == 1 and not forcibly and len(result) > 0:
             await self.send_message(
                 msg, result[0].get("content", "空规则描述"),
