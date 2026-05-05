@@ -704,7 +704,7 @@ class MinesVariants(BasePlugin):
 
         # 3. 修改 YAML 文件
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(rule_todo, f, ensure_ascii=True)
+            json.dump(rule_todo, f, ensure_ascii=False, indent=4)
 
         # 4. 发送消息（放在文件修改之后，但不要干扰后续 Git 操作）
         if doc:
