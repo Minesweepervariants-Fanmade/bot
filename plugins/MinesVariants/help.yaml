@@ -155,3 +155,9 @@
       #del并回复指定消息来尝试撤回被回复的内容
     name: "小小神中医"
     uid: "3086842243"
+
+-   content: |
+      #修改作者 / #chown
+      修改注册的规则的所属作者 格式:#chown <ruleID> <AuthorName> [QQuser_id]
+    name: "小小神中医"
+    uid: "3086842243"

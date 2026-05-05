@@ -460,6 +460,13 @@ class MinesVariants(BasePlugin):
                         await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
                         return
                     await self.command(' '.join(command[1:]), msg)
+                case "#修改作者" | "#chown":
+                    uid = msg.sender.user_id
+                    if uid not in self.data["admin"]:
+                        await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
+                        return
+                    await self.chown(msg)
+                    return
                 case "#注册规则" | "#reg":
                     command = msg.raw_message.split(" ", 2)
                     if len(command) == 3:
@@ -573,6 +580,98 @@ class MinesVariants(BasePlugin):
         else:
             # 如果不是数字就是查询规则
             await self.search_rule(msg, [""] + command)
+
+    async def chown(self, msg: PrivateMessage | GroupMessage, command: list[str] = None):
+        if command is None:
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()
+
+        # 解析参数: #chown <ruleID> <AuthorName> [QQuser_id]
+        if len(command) < 3:
+            await self.send_message(msg, "格式错误： #chown <规则ID> <作者名> [QQ号]")
+            return
+
+        rule_id = command[1]
+        new_author_name = command[2]
+        new_author_uid = -1
+        if len(command) >= 4 and command[3].isdigit():
+            new_author_uid = int(command[3])
+
+        # 读取待注册规则文件
+        todo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule", "ruleTodo.json")
+        if not os.path.exists(todo_path):
+            await self.send_message(msg, "规则暂存文件不存在，请联系管理员")
+            return
+
+        with open(todo_path, "r", encoding="utf-8") as f:
+            rule_todo = json.load(f)
+
+        # 查找目标规则
+        target_rule = None
+        for rule in rule_todo:
+            if rule["name"] == rule_id:
+                target_rule = rule
+                break
+
+        if target_rule is None:
+            await self.send_message(msg, f"未找到规则ID: {rule_id}")
+            return
+
+        # 记录旧信息用于回复
+        old_name = target_rule["author_name"]
+        old_uid = target_rule["author_uid"]
+
+        # 修改作者
+        target_rule["author_name"] = new_author_name
+        if new_author_uid is not None:
+            target_rule["author_uid"] = new_author_uid
+
+        # 1. 同步远程（保持已有逻辑）
+        repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
+        await run_command('git fetch origin doc', cwd=repo_path)
+        ret, _, err = await run_command('git reset --hard origin/doc', cwd=repo_path)
+        if ret != 0:
+            await self.send_message(msg, "同步远程失败")
+            return
+
+        # 保存文件
+        with open(todo_path, "w", encoding="utf-8") as f:
+            json.dump(rule_todo, f, ensure_ascii=False, indent=4)
+
+        await self.send_message(msg, f"规则 [{rule_id}] 的作者已修改为 {new_author_name}" +
+                                (f"(QQ: {new_author_uid})" if new_author_uid else ""))
+
+        # Git 提交推送（参考 register_rules 的实现）
+        repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
+
+        # 添加变更
+        await run_command('git add ruleTodo.json', cwd=repo_path)
+
+        # 提交
+        commit_msg = f"chown: 修改规则 [{rule_id}] 作者从 {old_name}({old_uid}) 为 {new_author_name}({new_author_uid})"
+        ret, _, _ = await run_command(f'git commit -m "{commit_msg}"', cwd=repo_path)
+        if ret != 0:
+            await self.send_message(msg, "无内容变更或提交失败")
+            return
+
+        # 推送
+        ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+        if ret != 0:
+            # 尝试拉取再推送
+            await run_command('git pull --rebase origin doc', cwd=repo_path)
+            ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+            if ret != 0:
+                await self.send_message(msg, "推送失败，请手动检查")
+                return
+
+        # 更新本地记录的远程哈希（可选）
+        ret, hash_out, _ = await run_command('git rev-parse origin/doc', cwd=repo_path)
+        if ret == 0 and hash_out:
+            self.data["last_remote_hash_doc"] = hash_out.strip()
+            await self.send_message(msg, "规则文件已推送到远端仓库。")
+
+        ALL_RULE.clear()
+        self.all_rule()
 
     async def get_log(self, msg: PrivateMessage | GroupMessage, log_id: str = None):
         if log_id is None:
