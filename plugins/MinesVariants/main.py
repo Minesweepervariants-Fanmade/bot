@@ -413,10 +413,11 @@ class MinesVariants(BasePlugin):
 
     @bot.group_event()
     async def on_group_event(self, msg: GroupMessage):
-        print("[GUP]", msg.group_id, ":", msg.raw_message[:20].replace("\n", ""), end="\r")
         try:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
+            print("[GUP]", msg.group_id, ":", command, end="\r")
+
             if not raw_message.startswith("#"):
                 return
 
@@ -489,7 +490,6 @@ class MinesVariants(BasePlugin):
                     await self.chown(msg)
                     return
                 case "#注册规则" | "#reg":
-                    command = msg.raw_message.split(" ", 2)
                     if len(command) == 3:
                         # 注册新规则
                         rule_doc = "".join(
