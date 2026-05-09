@@ -349,12 +349,17 @@ class MinesVariants(BasePlugin):
 
     @bot.private_event()
     async def on_private_event(self, msg: PrivateMessage):
-        print("[PRI]", msg.user_id, ":", msg.raw_message[:20].replace("\n", ""), end="\r")
         try:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
             if not command:
                 return
+            print("[GUP]", msg.user_id, ":", raw_message[:20].replace("\n", ""), end="\r")
+
+            if not raw_message.startswith("#"):
+                return
+            print("[GUP]", msg.user_id, ":", command, end="\r")
+
             match command[0]:
                 case "#生成" | "#sc" | "#summon" | "#run":
                     self.data["id"] += 1
@@ -416,16 +421,18 @@ class MinesVariants(BasePlugin):
         try:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
-            print("[GUP]", msg.group_id, ":", command, end="\r")
+            print("[GUP]", msg.group_id, ":", raw_message[:20].replace("\n", ""), end="\r")
 
             if not raw_message.startswith("#"):
                 return
 
-            # if command:
-            #     command[0] = command[0][1:]
-
             if not command:
                 return
+
+            print("[GUP]", msg.group_id, ":", command, end="\r")
+
+            # if command:
+            #     command[0] = command[0][1:]
             match command[0]:
                 case "#生成" | "#sc" | "#summon" | "#run":
                     self.data["id"] += 1
