@@ -497,7 +497,7 @@ class MinesVariants(BasePlugin):
                     await self.chown(msg)
                     return
                 case "#注册规则" | "#reg":
-                    if len(command) == 3:
+                    if len(command) > 2:
                         # 注册新规则
                         rule_doc = "".join(
                             [data["data"]["text"] for data in msg.message if data["type"] == "text"]
