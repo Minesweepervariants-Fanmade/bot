@@ -135,6 +135,7 @@ request_map: dict[int, "Request"] = {}
 HOST_IP = get_host_ip()
 ALL_RULE = []  # {name: [], doc: "..."}, ...
 MAX_LENGTH = 7000
+CHUNK_MAX_LENGTH = 100
 
 NICK_NAME = response("users", "default_bot", "nickname")
 USER_ID = response("users", "default_bot", "id")
@@ -169,14 +170,17 @@ def pck(content, image="", user_id=USER_ID, nickname=NICK_NAME) -> list:
         return []
 
 
-def split_by_content_length(items, max_len=MAX_LENGTH):
+def split_by_content_length(items, max_len=MAX_LENGTH, chunk_max_length=CHUNK_MAX_LENGTH):
     chunks = []
     cur_chunk = []
     cur_len = 0
     for item in items:
         item_len = len(item.get("content", str(item)))
         # 如果当前块节点数已达上限，或加上当前item后长度超限，则切块
-        if cur_len + item_len > max_len and cur_chunk:
+        if (
+            (cur_len + item_len > max_len and cur_chunk) or
+            len(cur_chunk) >= chunk_max_length
+        ):
             chunks.append(cur_chunk)
             cur_chunk = [item]
             cur_len = item_len
@@ -1141,36 +1145,43 @@ class MinesVariants(BasePlugin):
             await self.send_private_forward_msg_text(result, msg)
 
     async def rule_list(self, msg):
-        # news = [{"text": response("categories", "left_rules")},
-        #         {"text": response("categories", "middle_rules")},
-        #         {"text": response("categories", "right_rules")}]
+        await self.send_message(msg, "规则列表: https://minesweepervariants-fanmade.github.io/rule/")
+        return
 
-        self.all_rule()
-        all_rule: list[list[str | dict]] = []
-        for index in range(3):
-            all_rule.append([[
-                response("categories", "left_rules_title"),
-                response("categories", "middle_rules_title"),
-                response("categories", "right_rules_title"),
-            ][index]])
-            for rule in ALL_RULE[index]:
-                rule_doc: dict = rule["doc"]
-                all_rule[-1].append(rule_doc)
-
-        all_rule += [response("categories", "todo_rules_title")]
-
-        result = []
-
-        for rule in ALL_RULE[3]:
-            result.append(rule["doc"])
-        if len(result) > 100:
-            result = [result[i:i + 100] for i in range(0, len(result), 100)]
-        all_rule += result
-
-        await self.send_group_forward_msg_text(
-            all_rule, msg,
-            # source=response("categories", "rules_list")
-        )
+        # self.all_rule()
+        # all_rule: list[list[str | dict] | str] = []
+        # for index in range(3):
+        #     all_rule.append([
+        #         response("categories", "left_rules_title"),
+        #         response("categories", "middle_rules_title"),
+        #         response("categories", "right_rules_title"),
+        #     ][index])
+        #     result = []
+        #     for rule in ALL_RULE[index]:
+        #         rule_doc: dict = rule["doc"]
+        #         result.append(rule_doc)
+        #     # if len(result) > 100:
+        #     #     result = [result[i:i + 100] for i in range(0, len(result), 100)]
+        #     result = split_by_content_length(result, chunk_max_length=50)
+        #     all_rule.extend(result)
+        #
+        # all_rule += [response("categories", "todo_rules_title")]
+        #
+        # result = []
+        #
+        # for rule in ALL_RULE[3]:
+        #     result.append(rule["doc"])
+        # # if len(result) > 100:
+        # #     result = [result[i:i + 100] for i in range(0, len(result), 100)]
+        # result = split_by_content_length(result, chunk_max_length=50)
+        # all_rule.extend(result)
+        #
+        # json.dump(all_rule, open(f"{SELF_PATH}/tmp.json", "w"), indent=4, ensure_ascii=False)
+        #
+        # await self.send_group_forward_msg_text(
+        #     all_rule, msg,
+        #     # source=response("categories", "rules_list")
+        # )
 
     def all_rule(self) -> list[list[dict[str, list[str] | dict | str]]]:
         """
