@@ -1145,7 +1145,7 @@ class MinesVariants(BasePlugin):
             await self.send_private_forward_msg_text(result, msg)
 
     async def rule_list(self, msg):
-        await self.send_message(msg, "规则列表: https://minesweepervariants-fanmade.github.io/rule/")
+        await self.send_message(msg, response("rules", "rule_list"))
         return
 
         # self.all_rule()

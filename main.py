@@ -35,6 +35,7 @@ config.set_token(botData["token"])  # 设置 token (napcat 服务器的 token)
 
 bot = BotClient()
 
+# EVENT_BUS = bot.plugin_sys.event_bus
 
 
 if __name__ == "__main__":

@@ -1,5 +1,10 @@
-"out_path": "D:\\MinesweeperVariants\\output" # MinesweeperVariants项目的输出路径
-"log_path": "D:\\MinesweeperVariants\\log" # MinesweeperVariants项目的输出路径
-"image_path": "D:\\MinesweeperVariants\\minesweepervariants\\impl\\rule\\image"   # 规则附图位置
-"porject_path": "D:\\MinesweeperVariants"
-"interval": 0.5
+'out_path': 'D:\MinesweeperVariants\output'
+'log_path': 'D:\MinesweeperVariants\log'
+'image_path': 'D:\MinesweeperVariants\minesweepervariants\impl\rule\image'
+'porject_path': 'D:\MinesweeperVariants'
+'interval': 0.5
+
+'task_text_path': 'D:\0.0\lib\ds-browser\task.txt'
+'working_dir': 'D:\0.0\lib\my_python\Minesweeper_Variant'
+'working_index': 'D:\0.0\lib\ds-browser\node_modules\deepseek-browser-agent\src\index.js'
+'test_bat_path': 'D:\0.0\lib\ds-browser\test.bat'

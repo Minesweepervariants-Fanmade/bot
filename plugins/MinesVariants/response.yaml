@@ -122,6 +122,8 @@ rules:
     - "为你找到了{}条包含\"{}\"的规则哦！(*´▽`*)"
   register_fmt_error:
     - "注册格式错误 #注册规则 <规则名称> [规则描述]"
+  rule_list:
+    - "规则列表: https://minesweepervariants-fanmade.github.io/rule/或使用查询规则[#/p0, #/p1, ...]进行浏览"
 
 # 图片相关
 images:
@@ -146,7 +148,8 @@ categories:
   todo_rules_title: "待办规则"
 
   todo_rule_fmt: |
-    规则名称:[{}]
+    代办规则
+    名称:[{}]
     介绍: {}
     作者:{} ({})
     最后编辑时间:{}
