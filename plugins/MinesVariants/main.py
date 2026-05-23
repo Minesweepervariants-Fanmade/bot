@@ -1640,7 +1640,7 @@ class MinesVariants(BasePlugin):
             if "%" in rule:
                 rules[rule_index] = rules[rule_index].replace("%", "$6")
 
-        args = "-a 5 -s "
+        args = "-a 1 -s "
         args += " ".join(size)
         args += " -c "
         args += " ".join(rules)
