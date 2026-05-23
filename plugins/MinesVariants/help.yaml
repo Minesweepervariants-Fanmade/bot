@@ -1,5 +1,7 @@
 - content: |
-    1. 指令 "#所有规则"/"#规则列表"/"#list"/"#ls": 用来输出所有规则。
+    1. 规则列表: https://minesweepervariants-fanmade.github.io/rule/
+    或使用查询规则[#/p0, #/p1, ...]进行浏览
+#    1. 指令 "#所有规则"/"#规则列表"/"#list"/"#ls": 用来输出所有规则。
   name: "小小神中医"
   uid: "3086842243"
 - content: |
