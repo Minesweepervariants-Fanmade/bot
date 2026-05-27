@@ -1592,8 +1592,8 @@ class MinesVariants(BasePlugin):
 
     async def kill_thread(self, command, msg):
         kill_list = []
-        if "all" in command or "a" in command:
-            command.extend([str(i) for i in request_map.keys()])
+        if ("all" in command) or ("a" in command):
+            command.extend([str(i) for i in request_map.keys()] + ["0"])
         for command_arg in command[1:]:
             if command_arg.isdigit():
                 kill_list.append(int(command_arg))
