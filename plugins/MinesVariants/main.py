@@ -10,7 +10,7 @@ from pathlib import Path
 import socket
 import threading
 import datetime
-from typing import Union
+from typing import Union, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import psutil
@@ -475,6 +475,11 @@ class MinesVariants(BasePlugin):
                         else:
                             error_msg = "Failed to load help file, please try again later."
                         await self.api.post_group_msg(msg.group_id, error_msg)
+                case "#hint" | "#提示":
+                    if len(command) > 1:
+                        await self.get_hint(msg, command[1])
+                    else:
+                        await self.api.post_group_msg(msg.group_id, response("prompts", "log_format_error"))
                 case "#log":
                     if len(command) > 1:
                         await self.get_log(msg, command[1])
@@ -704,6 +709,136 @@ class MinesVariants(BasePlugin):
 
         ALL_RULE.clear()
         self.all_rule()
+
+    async def get_hint(self, msg: PrivateMessage | GroupMessage, hint_id: str = None):
+        if hint_id is None:
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()
+            if len(command) < 2:
+                await self.api.post_group_msg(msg.group_id, response("prompts", "log_format_error"))
+                return
+            hint_id = command[1]
+            if not hint_id.isdigit():
+                await self.api.post_group_msg(msg.group_id, response("prompts", "log_id_format_error"))
+                return
+        hint_id = int(hint_id)
+        target_log_path = f"{config_data['log_path']}/{hint_id}.log"
+        if not os.path.exists(target_log_path):
+            await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+            return
+        with open(target_log_path, "r", encoding="utf-8") as f:
+            while "使用规则" not in (line := f.readline()) and line: ...
+            if not line:
+                await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+                return
+            rule_list = line.split("RULE:", 1)[1].split("EARLY_RULE:[", 1)[0]
+            rule_list = ' '.join(eval(rule_list))
+            while "|[BOARD]: " not in (line := f.readline()) and line: ...
+            if not line:
+                await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+                return
+            board_code = line.split("|[BOARD]: ", 1)[1].split("|", 1)[0]
+            while "|[ANSWER_BOARD]: " not in (line := f.readline()) and line: ...
+            if not line:
+                await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+                return
+            answer_code = line.split("|[ANSWER_BOARD]: ", 1)[1].split("|", 1)[0]
+
+        async def get_hint():
+            nonlocal board_code, answer_code, rule_list, hint_id
+            file_name = f"hint_{hint_id}"
+            request = Request()
+            # 把同步阻塞任务扔到线程池，避免卡事件循环
+            args = (
+                f"hint -b {board_code} "
+                f"-a {answer_code} "
+                f"-c {rule_list} "
+                f"-F {file_name} "
+                f"-m PUZZLE"
+            )
+            request.run_task(args, mode="LINE")
+
+            while "PID" not in ''.join(request.output_buffer):
+                time.sleep(0.1)
+            request.pid = int(
+                [
+                    i for i in request.output_buffer if "PID" in i
+                ][0].split("PID:[")[1].split("]")[0]
+            )
+            await self.send_message(msg, f"开始计算提示(PID:{request.pid})")
+
+            # while not request.is_completed():
+            #     time.sleep(1)
+            #     print(request.get_output() + "1", end="", flush=True)
+            #     request.output_buffer.clear()
+            #
+            # print("quit", flush=True)
+
+            request.wait_completion()
+
+            images_path = []
+            log_path = config_data["log_path"] + "\\" + file_name + ".log"
+            log_text = ""
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as log_file:
+                    log_text = log_file.read()
+                Path(log_path).unlink()
+            for _line in (request.get_output() + log_text).splitlines():
+                _line = _line.strip()
+                if "Image saved to:" in _line:
+                    image_path = _line.split("Image saved to:", 1)[1].strip()
+                    images_path.append(image_path)
+            base64_contents = []
+            images_path = sorted(images_path, key=lambda p: int(p.split('_')[-1].split('.')[0]))
+            for image_path in images_path:
+                with open(image_path, "rb") as img_file:
+                    base64_content = "base64://" + base64.b64encode(img_file.read()).decode('utf-8')
+                    base64_contents.append(base64_content)
+            if not images_path:
+                msg_length = 9
+                str_length = 1000
+                result = '\n'.join([i for i in request.get_output().split("\n")][-250:])
+                err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][
+                             ::-1]
+                if isinstance(msg, GroupMessage):
+                    await self.send_group_forward_msg_text(
+                        text=err_result,
+                        source=response("categories", "terminal_output"),
+                        msg=msg
+                    )
+                elif isinstance(msg, PrivateMessage):
+                    await self.api.post_private_msg(
+                        msg.user_id,
+                        response("task", "failed").format(request.request_id),
+                        reply=msg.message_id
+                    )
+                    await self.send_private_forward_msg_text(
+                        text=err_result,
+                        source=response("categories", "terminal_output"),
+                        msg=msg
+                    )
+
+                request.close_connection()
+                return
+            _log.info(f"hint: 共{len(base64_contents)}份图片待发送")
+            if isinstance(msg, GroupMessage):
+                await self.send_group_forward_msg_image(base64_contents, msg, summary=None)
+            elif isinstance(msg, PrivateMessage):
+                await self.send_private_forward_msg_image(base64_contents, msg, summary=None)
+
+            request.close_connection()
+            for image_path in images_path:
+                Path(image_path).unlink(missing_ok=True)
+
+        def start_hint():
+            # 创建新事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(get_hint())
+            loop.close()
+
+        threading.Thread(target=start_hint, daemon=True).start()
+
 
     async def get_log(self, msg: PrivateMessage | GroupMessage, log_id: str = None):
         if log_id is None:
@@ -1295,32 +1430,74 @@ class MinesVariants(BasePlugin):
             await self.api.post_group_msg(msg.group_id, str(result))
         return check_and_log(result)
 
-    async def send_group_forward_msg_image(self, path, msg: GroupMessage):
-        if not path.startswith("base64://"):
-            path = f"http://{HOST_IP}\\" + path.replace("\\", "/").lstrip("/")
-        content = [{"type": "image", "data": {
-            "file": path, "summary": response("images", "answer")
-        }}]
-        message = [{"type": "node", "data": {
-            "user_id": response("users", "default_bot", "id"),
-            "nickname": response("users", "default_bot", "nickname"),
-            "content": content
-        }}]
-        params = {"group_id": msg.group_id, "message": message, "new": [{"text": "string"}]}
+    async def send_group_forward_msg_image(self, path: list | str, msg: GroupMessage, summary: Optional[str]):
+        if type(path) is str:
+            paths = [path]
+        else:
+            paths = path
+        paths: list[str]
+        if not paths:
+            return
+        real_path = []
+        for path in paths:
+            if not path.startswith("base64://"):
+                real_path.append(f"http://{HOST_IP}\\" + path.replace("\\", "/").lstrip("/"))
+            else:
+                real_path.append(path)
+        messages = []
+        for path in real_path:
+            messages.append(
+                {
+                    "type": "node", "data": {
+                        "user_id": response("users", "default_bot", "id"),
+                        "nickname": response("users", "default_bot", "nickname"),
+                        "content": [{
+                            "type": "image",
+                            "data": {
+                                "file": path
+                            }
+                        }]
+                    }
+                }
+            )
+            if summary:
+                messages[-1]["data"]["content"][0]["data"]["summary"] = summary
+        params = {"group_id": msg.group_id, "messages": messages}
         return check_and_log(await self.api._http.post("/send_group_forward_msg", json=params))
 
-    async def send_private_forward_msg_image(self, path, msg: PrivateMessage):
-        if not path.startswith("base64://"):
-            path = f"http://{HOST_IP}\\" + path.replace("\\", "/").lstrip("/")
-        content = [{"type": "image", "data": {
-            "file": path, "summary": response("images", "answer")
-        }}]
-        message = [{"type": "node", "data": {
-            "user_id": response("users", "default_bot", "id"),
-            "nickname": response("users", "default_bot", "nickname"),
-            "content": content
-        }}]
-        params = {"user_id": msg.user_id, "message": message, "new": [{"text": "string"}]}
+    async def send_private_forward_msg_image(self, path: list | str, msg: PrivateMessage, summary: Optional[str]):
+        if type(path) is str:
+            paths = [path]
+        else:
+            paths = path
+        paths: list[str]
+        if not paths:
+            return
+        real_path = []
+        for path in paths:
+            if not path.startswith("base64://"):
+                real_path.append(f"http://{HOST_IP}\\" + path.replace("\\", "/").lstrip("/"))
+            else:
+                real_path.append(path)
+        messages = []
+        for path in real_path:
+            messages.append(
+                {
+                    "type": "node", "data": {
+                        "user_id": response("users", "default_bot", "id"),
+                        "nickname": response("users", "default_bot", "nickname"),
+                        "content": [{
+                            "type": "image",
+                            "data": {
+                                "file": path
+                            }
+                        }]
+                    }
+                }
+            )
+            if summary:
+                messages[-1]["data"]["content"][0]["data"]["summary"] = summary
+        params = {"user_id": msg.user_id, "messages": messages, "new": [{"text": "string"}]}
         return check_and_log(await self.api._http.post("/send_private_forward_msg", json=params))
 
     async def state(self, msg):
@@ -1415,7 +1592,7 @@ class MinesVariants(BasePlugin):
 
     async def kill_thread(self, command, msg):
         kill_list = []
-        if "all" in command:
+        if "all" in command or "a" in command:
             command.extend([str(i) for i in request_map.keys()])
         for command_arg in command[1:]:
             if command_arg.isdigit():
@@ -1708,12 +1885,14 @@ class MinesVariants(BasePlugin):
             if isinstance(msg, GroupMessage):
                 await self.send_group_forward_msg_image(
                     path=base64_content,
-                    msg=msg
+                    msg=msg,
+                    summary=response("images", "answer")
                 )
             elif isinstance(msg, PrivateMessage):
                 await self.send_private_forward_msg_image(
                     path=base64_content,
-                    msg=msg
+                    msg=msg,
+                    summary=response("images", "answer")
                 )
             pathlib.Path.unlink((config_data["out_path"] + "\\" +
                                  str(request.request_id) + "answer.png"))
