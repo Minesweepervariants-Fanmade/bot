@@ -715,37 +715,47 @@ class MinesVariants(BasePlugin):
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
             if len(command) < 2:
-                await self.api.post_group_msg(msg.group_id, response("prompts", "log_format_error"))
+                await self.send_message(msg, response("prompts", "log_format_error"))
                 return
             hint_id = command[1]
             if not hint_id.isdigit():
-                await self.api.post_group_msg(msg.group_id, response("prompts", "log_id_format_error"))
+                await self.send_message(msg, response("prompts", "log_id_format_error"))
                 return
         hint_id = int(hint_id)
         target_log_path = f"{config_data['log_path']}/{hint_id}.log"
         if not os.path.exists(target_log_path):
-            await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+            await self.send_message(msg, response("prompts", "log_unfind_error"))
             return
         with open(target_log_path, "r", encoding="utf-8") as f:
-            while "使用规则" not in (line := f.readline()) and line: ...
+            while "RULE" not in (line := f.readline()) and line: ...
             if not line:
-                await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+                await self.send_message(msg, response("prompts", "log_unfind_error"))
                 return
             rule_list = line.split("RULE:", 1)[1].split("EARLY_RULE:[", 1)[0]
             rule_list = ' '.join(eval(rule_list))
+            while "[USED_R]" not in (line := f.readline()) and line: ...
+            if not line:
+                await self.send_message(msg, response("prompts", "log_unfind_error"))
+                return
+            used_r = eval(line.split("[USED_R]:", 1)[1].strip())
             while "|[BOARD]: " not in (line := f.readline()) and line: ...
             if not line:
-                await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+                await self.send_message(msg, response("prompts", "log_unfind_error"))
                 return
             board_code = line.split("|[BOARD]: ", 1)[1].split("|", 1)[0]
             while "|[ANSWER_BOARD]: " not in (line := f.readline()) and line: ...
             if not line:
-                await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
+                await self.send_message(msg, response("prompts", "log_unfind_error"))
                 return
             answer_code = line.split("|[ANSWER_BOARD]: ", 1)[1].split("|", 1)[0]
+            while "[TOTAL]" not in (line := f.readline()) and line: ...
+            if not line:
+                await self.send_message(msg, response("prompts", "log_unfind_error"))
+                return
+            total = eval(line.split("[TOTAL]:", 1)[1].split("|", 1)[0])
 
         async def get_hint():
-            nonlocal board_code, answer_code, rule_list, hint_id
+            nonlocal board_code, answer_code, rule_list, hint_id, used_r, total
             file_name = f"hint_{hint_id}"
             request = Request()
             # 把同步阻塞任务扔到线程池，避免卡事件循环
@@ -754,7 +764,9 @@ class MinesVariants(BasePlugin):
                 f"-a {answer_code} "
                 f"-c {rule_list} "
                 f"-F {file_name} "
-                f"-m PUZZLE"
+                f"-m PUZZLE" + (
+                    ' -r -t ' + str(total) if used_r else ''
+                )
             )
             request.run_task(args, mode="LINE")
 
@@ -782,7 +794,6 @@ class MinesVariants(BasePlugin):
             if os.path.exists(log_path):
                 with open(log_path, "r", encoding="utf-8") as log_file:
                     log_text = log_file.read()
-                Path(log_path).unlink()
             for _line in (request.get_output() + log_text).splitlines():
                 _line = _line.strip()
                 if "Image saved to:" in _line:
