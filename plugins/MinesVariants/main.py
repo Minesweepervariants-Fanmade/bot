@@ -25,6 +25,7 @@ from ncatbot.core.message import GroupMessage, PrivateMessage
 from ncatbot.utils import logger
 import json
 
+REG_LOCK = asyncio.Lock()
 
 def get_host_ip():
     """
@@ -954,73 +955,74 @@ class MinesVariants(BasePlugin):
         image_name = get_rule_image(name) + ".png"
         image_path = os.path.join(image_dir, image_name)
 
-        # 1. 同步远程（保持已有逻辑）
-        await run_command('git fetch origin doc', cwd=repo_path)
-        ret, _, err = await run_command('git reset --hard origin/doc', cwd=repo_path)
-        if ret != 0:
-            await self.send_message(msg, "同步远程失败")
-            return
-
-        # 2. 处理图片（根据场景决定是添加、替换还是删除）
-        if doc and _response and _response.status_code == 200:
-            # 更新规则并提供了新图片 → 保存新图片
-            with open(image_path, "wb") as f:
-                f.write(_response.content)
-            _log.info(f"新图片已保存: {image_path}")
-            rule_data["image"] = image_name
-            await run_command(f'git add "{image_path}"', cwd=repo_path)
-
-        if (doc and not reply) or (not doc):
-            if os.path.exists(image_path):
-                os.remove(image_path)
-                await run_command(f'git add "{image_path}"', cwd=repo_path)
-                _log.info(f"图片已移除: {image_path}")
-                # 注意：此时删除操作已暂存，但仍需 commit
-                if "image" in rule_data:
-                    del rule_data["image"]
-
-        # 3. 修改 YAML 文件
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(rule_todo, f, ensure_ascii=False, indent=4)
-
-        # 4. 发送消息（放在文件修改之后，但不要干扰后续 Git 操作）
-        if doc:
-            if _doc:
-                await self.send_message(msg, response("categories", "todo_rule_update").format(name, _doc))
-            else:
-                await self.send_message(msg, response("categories", "todo_rule_create").format(name))
-        else:
-            await self.send_message(msg, response("categories", "todo_rule_del").format(name))
-
-        # 5. 刷新内存规则
-        ALL_RULE.clear()
-        self.all_rule()
-
-        # 6. Git 添加所有变更（包括新增、修改、删除）
-        #    使用 -A 自动处理所有状态
-        await run_command('git add -A', cwd=repo_path)
-
-        # 7. 提交
-        commit_msg = f"User[{msg.sender.nickname}] " + ('update' if doc else 'delete') + f' RULE[{name}]'
-        ret, _, _ = await run_command(f'git commit -m "{commit_msg}"', cwd=repo_path)
-        if ret != 0:
-            await self.send_message(msg, "无内容变更，跳过推送")
-            return
-
-        # 8. 推送（保留你的冲突处理）
-        ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
-        if ret != 0:
-            await run_command('git pull --rebase origin doc', cwd=repo_path)
-            ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+        async with REG_LOCK:
+            # 1. 同步远程（保持已有逻辑）
+            await run_command('git fetch origin doc', cwd=repo_path)
+            ret, _, err = await run_command('git reset --hard origin/doc', cwd=repo_path)
             if ret != 0:
-                await self.send_message(msg, "推送失败，请手动检查")
+                await self.send_message(msg, "同步远程失败")
                 return
 
-        # 9. 更新 hash
-        ret, hash_out, _ = await run_command('git rev-parse origin/doc', cwd=repo_path)
-        if ret == 0 and hash_out:
-            self.data["last_remote_hash_doc"] = hash_out.strip()
-            await self.send_message(msg, "规则文件已推送到远端仓库。")
+            # 2. 处理图片（根据场景决定是添加、替换还是删除）
+            if doc and _response and _response.status_code == 200:
+                # 更新规则并提供了新图片 → 保存新图片
+                with open(image_path, "wb") as f:
+                    f.write(_response.content)
+                _log.info(f"新图片已保存: {image_path}")
+                rule_data["image"] = image_name
+                await run_command(f'git add "{image_path}"', cwd=repo_path)
+
+            if (doc and not reply) or (not doc):
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                    await run_command(f'git add "{image_path}"', cwd=repo_path)
+                    _log.info(f"图片已移除: {image_path}")
+                    # 注意：此时删除操作已暂存，但仍需 commit
+                    if "image" in rule_data:
+                        del rule_data["image"]
+
+            # 3. 修改 YAML 文件
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(rule_todo, f, ensure_ascii=False, indent=4)
+
+            # 4. 发送消息（放在文件修改之后，但不要干扰后续 Git 操作）
+            if doc:
+                if _doc:
+                    await self.send_message(msg, response("categories", "todo_rule_update").format(name, _doc))
+                else:
+                    await self.send_message(msg, response("categories", "todo_rule_create").format(name))
+            else:
+                await self.send_message(msg, response("categories", "todo_rule_del").format(name))
+
+            # 5. 刷新内存规则
+            ALL_RULE.clear()
+            self.all_rule()
+
+            # 6. Git 添加所有变更（包括新增、修改、删除）
+            #    使用 -A 自动处理所有状态
+            await run_command('git add -A', cwd=repo_path)
+
+            # 7. 提交
+            commit_msg = f"User[{msg.sender.nickname}] " + ('update' if doc else 'delete') + f' RULE[{name}]'
+            ret, _, _ = await run_command(f'git commit -m "{commit_msg}"', cwd=repo_path)
+            if ret != 0:
+                await self.send_message(msg, "无内容变更，跳过推送")
+                return
+
+            # 8. 推送（保留你的冲突处理）
+            ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+            if ret != 0:
+                await run_command('git pull --rebase origin doc', cwd=repo_path)
+                ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+                if ret != 0:
+                    await self.send_message(msg, "推送失败，请手动检查")
+                    return
+
+            # 9. 更新 hash
+            ret, hash_out, _ = await run_command('git rev-parse origin/doc', cwd=repo_path)
+            if ret == 0 and hash_out:
+                self.data["last_remote_hash_doc"] = hash_out.strip()
+                await self.send_message(msg, "规则文件已推送到远端仓库。")
 
     async def pull(self, msg):
         await self.send_message(msg, "开始拉取远程库")
