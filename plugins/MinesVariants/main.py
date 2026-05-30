@@ -783,9 +783,10 @@ class MinesVariants(BasePlugin):
             nonlocal board_code, answer_code, rule_list, hint_id, used_r, total
             self.data["id"] += 1
             self.data.save()
-            file_name = str(self.data["id"])
-            request = Request(max_length=50, _request_id=self.data["id"])
-            request_map[self.data["id"]] = request
+            request_id = self.data["id"]
+            file_name = str(request_id)
+            request = Request(max_length=50, _request_id=request_id)
+            request_map[request_id] = request
             # 把同步阻塞任务扔到线程池，避免卡事件循环
             args = (
                 f"hint -b {board_code} "
@@ -806,7 +807,7 @@ class MinesVariants(BasePlugin):
                 ][0].split("PID:[")[1].split("]")[0]
             )
             request.data = f"提示题板[{hint_id}]"
-            await self.send_message(msg, f"开始计算提示(PID:{request.pid})")
+            await self.send_message(msg, f"开始计算提示,使用#查询 {request_id}查询其进度")
 
             # while not request.is_completed():
             #     time.sleep(1)
