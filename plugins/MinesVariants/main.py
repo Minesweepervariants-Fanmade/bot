@@ -243,11 +243,12 @@ class Request:
     def _run_task(self, args: str,
                   host: str = "localhost",
                   port: int = 31408) -> None:
-        """实际执行任务的线程函数"""
+        """实际执行任务的线程函数（按行接收）"""
+        line_buffer = ""  # 用于缓存不完整的行
         try:
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client.connect((host, port))
-            self._socket = client  # 保存socket引用用于关闭
+            self._socket = client
 
             # 接收初始握手信号
             init_data = client.recv(4)
@@ -260,27 +261,41 @@ class Request:
             # 持续接收数据
             while not self._should_stop.is_set():
                 try:
-                    # 设置超时以定期检查停止标志
                     client.settimeout(1)
                     data = client.recv(4096)
                     if not data:  # 正常断开
                         break
 
                     decoded = data.decode('utf-8', errors='replace')
+                    line_buffer += decoded
+
+                    # 按换行符分割，保留每一行（含换行符）
+                    lines = line_buffer.split('\n')
+                    # 最后一部分可能不完整，留在缓冲区
+                    line_buffer = lines[-1]
+                    complete_lines = lines[:-1]
+
                     with self._lock:
                         if self.mode == "BIN":
+                            # BIN模式按二进制原始数据追加
                             if len(self.output_buffer) == 0:
                                 self.output_buffer.append(data)
                             else:
                                 self.output_buffer[0] += data
                         elif self.mode == "LINE":
-                            self.output_buffer.append(decoded)
+                            # 将完整的行逐条加入输出缓冲区
+                            for line in complete_lines:
+                                # 可以保留换行符，也可以不保留，根据需求
+                                self.output_buffer.append(line)
+                            # 如果此行包含 "Exit Code"，之后可以主动退出循环（可选）
+                            for line in complete_lines:
+                                if "Exit Code" in line:
+                                    break
 
                     if "Exit Code" in decoded:
                         break
 
                 except socket.timeout:
-                    # 超时后继续循环检查停止标志
                     continue
                 except ConnectionResetError:
                     with self._lock:
@@ -291,11 +306,15 @@ class Request:
                         self.output_buffer.append("\n" + response("system", "binary_data"))
                 except OSError as e:
                     if self._should_stop.is_set():
-                        # 如果是主动关闭导致的错误，正常退出
                         break
                     with self._lock:
                         self.output_buffer.append("\n" + response("system", "connection_error").format(str(e)))
                     break
+
+            # 处理缓冲区中最后剩余的部分（没有换行符结尾的数据）
+            if line_buffer and not self._should_stop.is_set():
+                with self._lock:
+                    self.output_buffer.append(line_buffer)
 
             # 维护缓冲区长度
             with self._lock:
@@ -762,8 +781,11 @@ class MinesVariants(BasePlugin):
 
         async def get_hint():
             nonlocal board_code, answer_code, rule_list, hint_id, used_r, total
-            file_name = f"hint_{hint_id}"
-            request = Request()
+            self.data["id"] += 1
+            self.data.save()
+            file_name = str(self.data["id"])
+            request = Request(max_length=50, _request_id=self.data["id"])
+            request_map[self.data["id"]] = request
             # 把同步阻塞任务扔到线程池，避免卡事件循环
             args = (
                 f"hint -b {board_code} "
@@ -783,6 +805,7 @@ class MinesVariants(BasePlugin):
                     i for i in request.output_buffer if "PID" in i
                 ][0].split("PID:[")[1].split("]")[0]
             )
+            request.data = f"提示题板[{hint_id}]"
             await self.send_message(msg, f"开始计算提示(PID:{request.pid})")
 
             # while not request.is_completed():
@@ -1737,7 +1760,7 @@ class MinesVariants(BasePlugin):
         if "尝试第" in log_text and "次minesweepervariants" in log_text:
             try_index = int(log_text.rsplit("尝试第", 1)[1].rsplit("次minesweepervariants")[0])
             if try_index > 1:
-                reply_text += f"\n重试第{try_index}次"
+                reply_text += response("progress", "retrying").format(try_index)
         for line in result.split("\n")[::-1]:
             line: str
             if line.strip() == "":
