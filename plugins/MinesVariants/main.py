@@ -27,6 +27,7 @@ import json
 
 REG_LOCK = asyncio.Lock()
 
+
 def get_host_ip():
     """
     查询本机ip地址
@@ -90,18 +91,22 @@ def response(*key: str) -> str:
 
 def update_all_rules():
     global ALL_RULE
-    request = None
-    for _ in range(6):
-        request = Request()
-        request.run_task("list --json", mode="BIN")
-        request.wait_completion(timeout=10)
-    result = request.get_output().split("\n")[1]
-    # print(request.get_output(), result)
-    with open(f"{SELF_PATH}/rule.json", 'w', encoding="utf-8") as f:
-        f.write(result)
     _log.info("发起更新规则列表")
-    ALL_RULE = []
-    return True
+    for _ in range(6):
+        try:
+            request = Request()
+            request.run_task("list --json", mode="BIN")
+            request.wait_completion(timeout=10)
+            result = request.get_output().split("\n")[1]
+            json.loads(result)
+        except:
+            continue
+        # print(request.get_output(), result)
+        with open(f"{SELF_PATH}/rule.json", 'w', encoding="utf-8") as f:
+            f.write(result)
+        ALL_RULE = []
+        return True
+    raise ValueError("update all rules failed")
 
 
 def get_system_stats(interval=None) -> str:
