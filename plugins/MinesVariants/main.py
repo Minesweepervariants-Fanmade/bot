@@ -1340,7 +1340,7 @@ class MinesVariants(BasePlugin):
         result_length = len(result)
         page_length = 75
         if on_random:
-            result = random.choices(result, k=min(on_random, len(result)))
+            result = random.sample(result, k=min(on_random, len(result)))
         if page > -1:
             result = result[page * page_length: (page + 1) * page_length]
         if (page < 0) and ((result_length if on_random == 0 else on_random) > 100):
