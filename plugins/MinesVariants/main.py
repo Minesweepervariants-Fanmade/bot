@@ -784,6 +784,7 @@ class MinesVariants(BasePlugin):
             await self.send_message(msg, response("prompts", "log_id_format_error"))
             return
         more_arg = raw_message.split(maxsplit=2)[-1]
+        more_arg = "" if more_arg == hint_id else more_arg
         hint_id = int(hint_id)
         target_log_path = f"{config_data['log_path']}/{hint_id}.log"
         if not os.path.exists(target_log_path):
