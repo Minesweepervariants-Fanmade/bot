@@ -42,6 +42,34 @@ def get_host_ip():
         s.close()
     return ip
 
+def parse_log_for_codes(log_path: str):
+    """从 hint 生成的日志文件中解析 board_code, answer_code, rules, total, used_r
+    返回: (board_code, answer_code, rules_list, total, used_r)
+    """
+    board_code = ""
+    answer_code = ""
+    rules_list = []
+    total = -1
+    used_r = False
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        for line in lines:
+            if "|[BOARD]: " in line:
+                board_code = line.split("|[BOARD]: ")[1].split("|", 1)[0].strip()
+            elif "|[ANSWER_BOARD]: " in line:
+                answer_code = line.split("|[ANSWER_BOARD]: ")[1].split("|", 1)[0].strip()
+            elif "RULE:" in line and "EARLY_RULE:" in line:
+                # 格式如: "RULE:['rule1', 'rule2'] EARLY_RULE:[]"
+                part = line.split("RULE:", 1)[1].split("EARLY_RULE:", 1)[0]
+                rules_list = eval(part)   # 注意：eval 有风险，但原代码已经这么用了，沿用
+            elif "[TOTAL]:" in line:
+                total = eval(line.split("[TOTAL]:", 1)[1].split("|", 1)[0])
+            elif "[USED_R]:" in line:
+                used_r = eval(line.split("[USED_R]:", 1)[1].strip())
+    except Exception as e:
+        _log.error(f"解析日志失败 {log_path}: {e}")
+    return board_code, answer_code, rules_list, total, used_r
 
 async def run_command(command: str, cwd=None):
     """
@@ -239,6 +267,15 @@ class Request:
             target=self._run_task, args=(args,), daemon=True
         )
         self._thread.start()
+
+    def send_input(self, text: str) -> None:
+        """向服务端发送交互输入（自动追加换行符）"""
+        if self._socket:
+            try:
+                # 大多数命令行程序期望输入以换行结束
+                self._socket.sendall((text + '\n').encode('utf-8'))
+            except Exception as e:
+                _log.warning(f"发送输入失败: {e}")
 
     def _run_task(self, args: str,
                   host: str = "localhost",
@@ -746,6 +783,7 @@ class MinesVariants(BasePlugin):
             if not hint_id.isdigit():
                 await self.send_message(msg, response("prompts", "log_id_format_error"))
                 return
+            more_arg = raw_message.split(maxsplit=2)[-1]
         hint_id = int(hint_id)
         target_log_path = f"{config_data['log_path']}/{hint_id}.log"
         if not os.path.exists(target_log_path):
@@ -780,12 +818,13 @@ class MinesVariants(BasePlugin):
             total = eval(line.split("[TOTAL]:", 1)[1].split("|", 1)[0])
 
         async def get_hint():
-            nonlocal board_code, answer_code, rule_list, hint_id, used_r, total
+            nonlocal board_code, answer_code, rule_list, hint_id, used_r, total, more_arg
             self.data["id"] += 1
             self.data.save()
             request_id = self.data["id"]
             file_name = str(request_id)
             request = Request(max_length=50, _request_id=request_id)
+            request.nickname = msg.sender.nickname
             request_map[request_id] = request
             # 把同步阻塞任务扔到线程池，避免卡事件循环
             args = (
@@ -793,9 +832,9 @@ class MinesVariants(BasePlugin):
                 f"-a {answer_code} "
                 f"-c {rule_list} "
                 f"-F {file_name} "
-                f"-m PUZZLE" + (
-                    ' -r -t ' + str(total) if used_r else ''
-                )
+                f"-m PUZZLE " + (
+                    '-r -t ' + str(total) if used_r else ''
+                ) + more_arg
             )
             request.run_task(args, mode="LINE")
 
@@ -817,6 +856,7 @@ class MinesVariants(BasePlugin):
             # print("quit", flush=True)
 
             request.wait_completion()
+            del request_map[request_id]
 
             images_path = []
             log_path = config_data["log_path"] + "\\" + file_name + ".log"
@@ -879,7 +919,6 @@ class MinesVariants(BasePlugin):
             loop.close()
 
         threading.Thread(target=start_hint, daemon=True).start()
-
 
     async def get_log(self, msg: PrivateMessage | GroupMessage, log_id: str = None):
         if log_id is None:
