@@ -1094,20 +1094,38 @@ class MinesVariants(BasePlugin):
                 await self.send_message(msg, "规则文件已推送到远端仓库。")
 
     async def pull(self, msg):
-        await self.send_message(msg, "开始拉取远程库")
+        await self.send_message(msg, "开始强制拉取远程库（丢弃所有本地已追踪文件修改）")
         result = []
         proj_path: str = config_data["porject_path"]
 
-        # ================= 1. 主仓库更新 (移除 --recurse-submodules，避免重置子模块) =================
+        # ========== 1. 获取当前分支 ==========
+        _, branch, _ = await run_command("git rev-parse --abbrev-ref HEAD", proj_path)
+        branch = branch.strip()
+        if not branch:
+            result.append("错误：无法获取当前分支名")
+            await self.send_group_forward_msg_text(result, msg)
+            return
+
+        # ========== 2. 主仓库强制更新并记录日志 ==========
+        # 记录旧 HEAD
         _, pre_main, _ = await run_command("git rev-parse HEAD", proj_path)
         pre_main = pre_main.strip()
 
-        rc, out, err = await run_command("git pull", proj_path)
-        result.append("命令: git pull")
+        # fetch
+        rc, out, err = await run_command("git fetch --all --prune", proj_path)
+        result.append("命令: git fetch --all --prune")
         result.append(f"退出码: {rc}")
         if out.strip(): result.append(f"输出:\n{out.strip()}")
         if err.strip(): result.append(f"错误:\n{err.strip()}")
 
+        # reset --hard
+        rc, out, err = await run_command(f"git reset --hard origin/{branch}", proj_path)
+        result.append(f"命令: git reset --hard origin/{branch}")
+        result.append(f"退出码: {rc}")
+        if out.strip(): result.append(f"输出:\n{out.strip()}")
+        if err.strip(): result.append(f"错误:\n{err.strip()}")
+
+        # 获取新增提交日志
         _, main_log, _ = await run_command(
             f'git log {pre_main}..HEAD --pretty=format:"  - %h %s (%an, %ad)" --date=short',
             proj_path
@@ -1118,56 +1136,60 @@ class MinesVariants(BasePlugin):
         else:
             result.append("主仓库无新增提交")
 
-        # ================= 2. 子模块独立更新与变更捕获 =================
+        # ========== 3. 子模块强制更新并记录日志 ==========
+        # 获取所有子模块路径及更新前的 SHA
         _, status, _ = await run_command("git submodule status", proj_path)
         sub_paths = []
+        pre_sub_shas = {}
         for line in status.splitlines():
             line = line.strip()
             if line:
                 parts = line.split()
                 if len(parts) >= 2:
-                    sub_paths.append(parts[1])
+                    sp = parts[1]
+                    sub_paths.append(sp)
+                    sub_cwd = os.path.join(proj_path, sp)
+                    if os.path.isdir(os.path.join(sub_cwd, '.git')) or os.path.isfile(os.path.join(sub_cwd, '.git')):
+                        _, sha, _ = await run_command("git rev-parse HEAD", sub_cwd)
+                        pre_sub_shas[sp] = sha.strip() if sha else ""
 
-        # 记录更新前 HEAD
-        pre_sub_shas = {}
-        for sp in sub_paths:
-            sub_cwd = os.path.join(proj_path, sp)
-            if os.path.isdir(os.path.join(sub_cwd, '.git')) or os.path.isfile(os.path.join(sub_cwd, '.git')):
-                _, sha, _ = await run_command("git rev-parse HEAD", sub_cwd)
-                pre_sub_shas[sp] = sha.strip() if sha else ""
-
-        # 执行子模块远程更新
-        rc, out, err = await run_command("git submodule update --remote --recursive", proj_path)
-        result.append("命令: git submodule update --remote --recursive")
+        # 执行强制更新（一条命令，不跳过）
+        rc, out, err = await run_command(
+            "git submodule update --init --recursive --force --remote",
+            proj_path
+        )
+        result.append("命令: git submodule update --init --recursive --force --remote")
         result.append(f"退出码: {rc}")
         if out.strip(): result.append(f"输出:\n{out.strip()}")
         if err.strip(): result.append(f"错误:\n{err.strip()}")
 
-        # 严格对比 SHA，仅输出真实位移
-        result.append("子模块新增提交:")
+        # 记录每个子模块的变化日志
+        result.append("子模块更新详情:")
         has_change = False
         for sp in sub_paths:
             sub_cwd = os.path.join(proj_path, sp)
+            if not (os.path.isdir(os.path.join(sub_cwd, '.git')) or os.path.isfile(os.path.join(sub_cwd, '.git'))):
+                result.append(f"  {sp}: 未初始化，跳过")
+                continue
             _, new_sha, _ = await run_command("git rev-parse HEAD", sub_cwd)
             new_sha = new_sha.strip()
             old_sha = pre_sub_shas.get(sp, "")
-
-            # 核心拦截：SHA 一致、未初始化或长度异常直接跳过
-            if not old_sha or not new_sha or len(new_sha) != 40 or old_sha == new_sha:
-                continue
-
-            _, log, _ = await run_command(
-                f'git log {old_sha}..{new_sha} --pretty=format:"    - %h %s (%an, %ad)" --date=short',
-                sub_cwd
-            )
-            if log.strip():
+            if old_sha and new_sha and old_sha != new_sha:
                 has_change = True
-                result.append(f"{sp}:")
-                result.append(log.strip())
+                _, log, _ = await run_command(
+                    f'git log {old_sha}..{new_sha} --pretty=format:"    - %h %s (%an, %ad)" --date=short',
+                    sub_cwd
+                )
+                if log.strip():
+                    result.append(f"  {sp}:")
+                    result.append(log.strip())
+                else:
+                    result.append(f"  {sp}: SHA 变化（无详细日志）")
+            else:
+                result.append(f"  {sp}: 无变化")
 
         if not has_change:
-            result.pop(-1)
-            result.append("子模块无变更")
+            result.append("  无子模块提交变更")
 
         update_all_rules()
         await self.send_group_forward_msg_text(result, msg)
