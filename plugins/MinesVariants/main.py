@@ -773,17 +773,17 @@ class MinesVariants(BasePlugin):
         self.all_rule()
 
     async def get_hint(self, msg: PrivateMessage | GroupMessage, hint_id: str = None):
+        raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+        command: list[str] = raw_message.split()
+        if len(command) < 2:
+            await self.send_message(msg, response("prompts", "log_format_error"))
+            return
         if hint_id is None:
-            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
-            command: list[str] = raw_message.split()
-            if len(command) < 2:
-                await self.send_message(msg, response("prompts", "log_format_error"))
-                return
             hint_id = command[1]
-            if not hint_id.isdigit():
-                await self.send_message(msg, response("prompts", "log_id_format_error"))
-                return
-            more_arg = raw_message.split(maxsplit=2)[-1]
+        if not hint_id.isdigit():
+            await self.send_message(msg, response("prompts", "log_id_format_error"))
+            return
+        more_arg = raw_message.split(maxsplit=2)[-1]
         hint_id = int(hint_id)
         target_log_path = f"{config_data['log_path']}/{hint_id}.log"
         if not os.path.exists(target_log_path):
