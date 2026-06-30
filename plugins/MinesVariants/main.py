@@ -834,7 +834,7 @@ class MinesVariants(BasePlugin):
                 f"-c {rule_list} "
                 f"-F {file_name} "
                 f"-m PUZZLE " + (
-                    '-r -t ' + str(total) if used_r else ''
+                    f'-r -t {total} ' if used_r else ''
                 ) + more_arg
             )
             request.run_task(args, mode="LINE")
@@ -938,26 +938,51 @@ class MinesVariants(BasePlugin):
             await self.api.post_group_msg(msg.group_id, response("prompts", "log_unfind_error"))
             return
 
-        remote_host = "root@10.147.19.3"
-        remote_dir = "/napcat/data"
-        container_file_path = f"/app/data/{log_id}.log"
-
-        # 上传文件到宿主机
-        subprocess.run(
-            ["scp", log_path, f"{remote_host}:{remote_dir}"],
-            stdout=subprocess.DEVNULL,  # 丢弃标准输出
-            stderr=subprocess.DEVNULL   # 丢弃标准错误
-        )
-
+        url_path = "http://" + HOST_IP + ":80/" + log_path.replace(":", "%3A").replace("\\", "/")
         # 发送文件：使用容器内本地路径
         if isinstance(msg, GroupMessage):
-            await self.api.post_group_file(msg.group_id, file=container_file_path)
+            # await self.api.post_group_file(msg.group_id, file=url_path)
+            return check_and_log(await self.api._http.post("/send_group_msg", json={
+              "group_id": msg.group_id,
+              "message": [{
+                  "type": "file", "data": {
+                      "file": url_path,
+                      "name": f"{log_id}.log.txt"
+                  }}
+              ]
+            }))
         elif isinstance(msg, PrivateMessage):
             # 注意：私聊发送文件的方法名可能是 post_private_file，请根据你的 API 确认
-            await self.api.post_private_file(msg.user_id, file=container_file_path)
+            return check_and_log(await self.api._http.post("/send_private_msg", json={
+              "group_id": msg.user_id,
+              "message": [{
+                  "type": "file", "data": {
+                      "file": url_path,
+                      "name": f"{log_id}.log.txt"
+                  }}
+              ]
+            }))
 
-        # 清理远程文件
-        subprocess.run(["ssh", remote_host, f"rm {remote_dir}/{log_id}.log"], text=True)
+        # remote_host = "root@10.147.19.3"
+        # remote_dir = "/napcat/data"
+        # container_file_path = f"/app/data/{log_id}.log"
+        #
+        # # 上传文件到宿主机
+        # subprocess.run(
+        #     ["scp", log_path, f"{remote_host}:{remote_dir}"],
+        #     stdout=subprocess.DEVNULL,  # 丢弃标准输出
+        #     stderr=subprocess.DEVNULL   # 丢弃标准错误
+        # )
+        #
+        # # 发送文件：使用容器内本地路径
+        # if isinstance(msg, GroupMessage):
+        #     await self.api.post_group_file(msg.group_id, file=container_file_path)
+        # elif isinstance(msg, PrivateMessage):
+        #     # 注意：私聊发送文件的方法名可能是 post_private_file，请根据你的 API 确认
+        #     await self.api.post_private_file(msg.user_id, file=container_file_path)
+        #
+        # # 清理远程文件
+        # subprocess.run(["ssh", remote_host, f"rm {remote_dir}/{log_id}.log"], text=True)
 
     async def send_message(self, msg, message: str, reply=None, image_path=None):
         image = None
@@ -1094,7 +1119,7 @@ class MinesVariants(BasePlugin):
                 await self.send_message(msg, "规则文件已推送到远端仓库。")
 
     async def pull(self, msg):
-        await self.send_message(msg, "开始强制拉取远程库（丢弃所有本地已追踪文件修改）")
+        await self.send_message(msg, "开始拉取远程库")
         result = []
         proj_path: str = config_data["porject_path"]
 
