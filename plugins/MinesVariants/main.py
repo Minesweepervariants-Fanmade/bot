@@ -539,9 +539,10 @@ class MinesVariants(BasePlugin):
                         await self.api.post_group_msg(msg.group_id, error_msg)
                 case "#hint" | "#提示":
                     if len(command) > 1:
-                        await self.get_hint(msg, command[1])
+                        hint_id = command[1]
                     else:
-                        await self.api.post_group_msg(msg.group_id, response("prompts", "log_format_error"))
+                        hint_id = ""
+                    await self.get_hint(msg, hint_id)
                 case "#log":
                     if len(command) > 1:
                         await self.get_log(msg, command[1])
@@ -773,6 +774,219 @@ class MinesVariants(BasePlugin):
         self.all_rule()
 
     async def get_hint(self, msg: PrivateMessage | GroupMessage, hint_id: str = None):
+        raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+        command: list[str] = raw_message.split()
+        ocr_path = ""
+        request_id = -1
+        if msg.message[0]["type"] == "reply":
+            reply_msg = await self.api.get_msg(msg.message[0]["data"]["id"])
+            reply_message = reply_msg["data"]["message"]
+            for reply_msg_part in reply_message:
+                if reply_msg_part["type"] != "image":
+                    continue
+                self.data["id"] += 1
+                request_id = self.data["id"]
+                img_url = reply_msg_part["data"]["url"]
+                ocr_path = config_data["out_path"] + f"\\ocr{request_id}.png"
+
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+
+                try:
+                    # 发送 GET 请求获取图片数据
+                    _response = requests.get(img_url, headers=headers, stream=True, timeout=30)
+                    _response.raise_for_status()  # 检查请求是否成功
+
+                    # 以二进制流方式写入文件
+                    with open(ocr_path, 'wb') as f:
+                        for chunk in _response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                        _log.info(f"图片被保存至{ocr_path}")
+                except requests.exceptions.RequestException as e:
+                    _log.warning(f"图片{img_url}下载失败")
+                    ocr_path = ""
+        if not ocr_path:
+            return await self.__get_hint(msg, hint_id=hint_id)
+        log_path = config_data["log_path"] + f"\\{request_id}.log"
+
+        board_code = ""
+
+        async def get_ocr():
+            nonlocal board_code
+            # 把同步阻塞任务扔到线程池，避免卡事件循环
+
+            request = Request(max_length=50, _request_id=request_id)
+            request_map[request_id] = request
+            args = (
+                f"ocr -i {ocr_path} "
+                f"-f {request_id} " + " ".join(command[1:])
+            )
+            request.data = "正在进行OCR任务"
+            request.run_task(args, mode="LINE")
+            while "PID" not in ''.join(request.output_buffer):
+                time.sleep(0.1)
+            request.pid = int(
+                [
+                    i for i in request.output_buffer if "PID" in i
+                ][0].split("PID:[")[1].split("]")[0]
+            )
+
+            await self.send_message(msg, f"开始计算提示,使用#查询 {request_id}查询其进度")
+
+            request.wait_completion()
+            Path(ocr_path).unlink(missing_ok=True)
+            if request_id in request_map:
+                del request_map[request_id]
+            else:
+                return
+
+            if os.path.exists(log_path):
+                with open(log_path, "rb") as f:
+                    f.seek(max(0, os.path.getsize(log_path) - 4096))
+                    raw = f.read()
+                    log_text = raw.decode("utf-8", errors="replace")  # 非法字节变 �
+            else:
+                log_text = "[EMPTY]"
+
+            result = request.get_output()
+            if "Exit Code: 0" not in result:
+                msg_length = 9
+                str_length = 1000
+                result = log_text + "\n\n" + '\n'.join([i for i in result.split("\n")][-50:])
+                err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][::-1]
+                response_text = response("task", "failed").format(request.request_id)
+                if "[STDERR EMPTY]" not in result:
+                    traceback = (result.split("[STDERR]:")[-1].rsplit(":[STDERR]", 1)[0]).split("\n")
+                    response_text += "\n" + [i for i in traceback if i][::-1][0]
+                if isinstance(msg, GroupMessage):
+                    await self.api.post_group_msg(
+                        msg.group_id,
+                        response_text,
+                        reply=msg.message_id
+                    )
+                    await self.send_group_forward_msg_text(
+                        text=err_result,
+                        source=response("categories", "terminal_output"),
+                        msg=msg
+                    )
+                elif isinstance(msg, PrivateMessage):
+                    await self.api.post_private_msg(
+                        msg.user_id,
+                        response_text,
+                        reply=msg.message_id
+                    )
+                    await self.send_private_forward_msg_text(
+                        text=err_result,
+                        source=response("categories", "terminal_output"),
+                        msg=msg
+                    )
+                return
+            with open(log_path, "r", encoding="utf-8") as f:
+                while "|[BOARD]: " not in (line := f.readline()) and line: ...
+                if not line:
+                    await self.send_message(msg, response("prompts", "log_unfind_error"))
+                    return
+                board_code = line.split("|[BOARD]: ", 1)[1].split("|", 1)[0]
+
+        async def get_hint():
+            nonlocal board_code
+            args = (
+                f"hint -b {board_code} "
+                f"-F {request_id} "
+                f"-m PUZZLE " + " ".join(command[1:])
+            )
+            request = Request(max_length=50, _request_id=request_id)
+            request_map[request_id] = request
+            request.data = "正在计算提示"
+            request.run_task(args, mode="LINE")
+            while "PID" not in ''.join(request.output_buffer):
+                time.sleep(0.1)
+            request.pid = int(
+                [i for i in request.output_buffer if "PID" in i
+                ][0].split("PID:[")[1].split("]")[0]
+            )
+
+            request.wait_completion()
+
+            images_path = []
+            log_text = ""
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as log_file:
+                    log_text = log_file.read()
+            for _line in (request.get_output() + log_text).splitlines():
+                _line = _line.strip()
+                if "Image saved to:" in _line:
+                    image_path = _line.split("Image saved to:", 1)[1].strip()
+                    images_path.append(image_path)
+            base64_contents = []
+            images_path = sorted(images_path, key=lambda p: int(p.split('_')[-1].split('.')[0]))
+            for image_path in images_path:
+                with open(image_path, "rb") as img_file:
+                    base64_content = "base64://" + base64.b64encode(img_file.read()).decode('utf-8')
+                    base64_contents.append(base64_content)
+
+            if request_id in request_map:
+                del request_map[request_id]
+            else:
+                for image_path in images_path:
+                    Path(image_path).unlink(missing_ok=True)
+                return
+            if not images_path:
+                msg_length = 9
+                str_length = 1000
+                result = log_text + '\n'.join([i for i in request.get_output().split("\n")][-250:])
+                err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][
+                             ::-1]
+                if isinstance(msg, GroupMessage):
+                    await self.send_group_forward_msg_text(
+                        text=err_result,
+                        source=response("categories", "terminal_output"),
+                        msg=msg
+                    )
+                elif isinstance(msg, PrivateMessage):
+                    await self.api.post_private_msg(
+                        msg.user_id,
+                        response("task", "failed").format(request.request_id),
+                        reply=msg.message_id
+                    )
+                    await self.send_private_forward_msg_text(
+                        text=err_result,
+                        source=response("categories", "terminal_output"),
+                        msg=msg
+                    )
+
+                request.close_connection()
+                return
+            _log.info(f"hint: 共{len(base64_contents)}份图片待发送")
+            if isinstance(msg, GroupMessage):
+                await self.send_group_forward_msg_image(base64_contents, msg, summary=None)
+            elif isinstance(msg, PrivateMessage):
+                await self.send_private_forward_msg_image(base64_contents, msg, summary=None)
+
+            request.close_connection()
+            for image_path in images_path:
+                Path(image_path).unlink(missing_ok=True)
+
+        def start_hint():
+            nonlocal board_code
+            # 创建新事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(get_ocr())
+            if board_code:
+                loop.run_until_complete(get_hint())
+            loop.close()
+
+        threading.Thread(target=start_hint, daemon=True).start()
+
+
+
+    async def __get_hint(self, msg: PrivateMessage | GroupMessage, hint_id: str = None):
+        if not hint_id:
+            await self.api.post_group_msg(msg.group_id, response("prompts", "log_format_error"))
+            return
         raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
         command: list[str] = raw_message.split()
         if len(command) < 2:
@@ -2023,13 +2237,19 @@ class MinesVariants(BasePlugin):
                     msg=msg,
                     summary=response("images", "answer")
                 )
-            pathlib.Path.unlink((config_data["out_path"] + "\\" +
-                                 str(request.request_id) + "answer.png"))
-            pathlib.Path.unlink((config_data["out_path"] + "\\" +
-                                 str(request.request_id) + "demo.png"))
+            pathlib.Path(
+                config_data["out_path"] + "\\" +
+                str(request.request_id) + "answer.png"
+            ).unlink()
+            pathlib.Path(
+                config_data["out_path"] + "\\" +
+                str(request.request_id) + "demo.png"
+            ).unlink()
             try:
-                pathlib.Path.unlink((config_data["out_path"] + "\\" +
-                                     str(request.request_id) + ".txt"))
+                pathlib.Path(
+                    config_data["out_path"] + "\\" +
+                    str(request.request_id) + ".txt"
+                ).unlink()
             except:
                 ...
             if "线索图: " in log_text:
