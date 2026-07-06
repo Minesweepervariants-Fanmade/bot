@@ -1442,7 +1442,13 @@ class MinesVariants(BasePlugin):
         else:
             if type(command) is list:
                 command = " ".join(command)
-            stdout = ["run command: " + command, stdout, "exit code: " + str(returncode), "stderr: \n\n" + stderr]
+            stdout = [
+                "run command: " + command,
+                stdout[max(0, len(stdout) - 5000):],
+                "exit code: " + str(returncode),
+                "stderr: \n\n" + stderr[max(0, len(stderr) - 5000):]
+            ]
+
             await self.send_group_forward_msg_text(stdout, msg)
 
     async def search_rule(self, msg: GroupMessage | PrivateMessage, command=None):
