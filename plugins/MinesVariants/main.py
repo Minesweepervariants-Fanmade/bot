@@ -1434,6 +1434,17 @@ class MinesVariants(BasePlugin):
         await self.send_group_forward_msg_text(result, msg)
 
     async def command(self, command, msg):
+        reply_text = ""
+        if msg.message[0]["type"] == "reply":
+            reply_msg = await self.api.get_msg(msg.message[0]["data"]["id"])
+            reply_message = reply_msg["data"]["message"]
+            for reply_msg_part in reply_message:
+                if reply_msg_part["type"] != "text":
+                    continue
+                reply_text = reply_msg_part["data"]["text"]
+                break
+        if reply_text:
+            command = "echo " + reply_text + " | " + command
         returncode, stdout, stderr = await run_command(
             command, config_data["porject_path"]
         )
