@@ -2136,8 +2136,6 @@ class MinesVariants(BasePlugin):
         #         rules.remove(rule)
 
         data = rules[:]
-        # if "-d" in data:
-        #     data = data[:data.index("-d")] + data[data.index("-d") + 2:]
         # if "-t" in data:
         #     data = data[:data.index("-t")] + data[data.index("-t") + 2:]
         # if "-a" in data:
@@ -2177,6 +2175,7 @@ class MinesVariants(BasePlugin):
         demo_img = config_data["out_path"] + "\\" + str(request.request_id) + "demo.png"
         answer_img = config_data["out_path"] + "\\" + str(request.request_id) + "answer.png"
         log_path = config_data["log_path"] + "\\" + str(request.request_id) + ".log"
+        is_test = ("-T" in data) or ("--test" in data)
 
         for _ in range(1):
             request.run_task(args)
@@ -2200,7 +2199,7 @@ class MinesVariants(BasePlugin):
             if "未找到规则" in result:
                 state = 2
                 break
-            if os.path.exists(demo_img) and os.path.exists(answer_img):
+            if (is_test or os.path.exists(demo_img)) and os.path.exists(answer_img):
                 state = 0
                 break
             _request = request.clone()
@@ -2221,13 +2220,34 @@ class MinesVariants(BasePlugin):
             if isinstance(msg, GroupMessage):
                 await self.api.post_group_file(
                     msg.group_id,
-                    image=demo_img
+                    image=answer_img if is_test else demo_img,
                 )
             elif isinstance(msg, PrivateMessage):
                 await self.api.post_private_file(
                     msg.user_id,
-                    image=demo_img
+                    image=answer_img if is_test else demo_img,
                 )
+            if is_test:
+                pathlib.Path(
+                    config_data["out_path"] + "\\" +
+                    str(request.request_id) + "answer.png"
+                ).unlink()
+
+                try:
+                    pathlib.Path(
+                        config_data["out_path"] + "\\" +
+                        str(request.request_id) + ".txt"
+                    ).unlink()
+                except:
+                    ...
+
+                await self.send_message(
+                    msg, response("task", "completed"),
+                    reply=msg.message_id
+                )
+                del request_map[request.request_id]
+                return
+
             with open(answer_img, "rb") as f:
                 base64_content = "base64://" + base64.b64encode(f.read()).decode('utf-8')
 
