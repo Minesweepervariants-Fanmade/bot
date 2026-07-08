@@ -1444,7 +1444,11 @@ class MinesVariants(BasePlugin):
                 reply_text = reply_msg_part["data"]["text"]
                 break
         if reply_text:
-            command = "echo " + reply_text + " | " + command
+            # 转义反引号和双引号（PowerShell 双引号内需要）
+            escaped = reply_text.replace("`", "``").replace('"', '`"')
+            # 将换行符替换为 PowerShell 的换行转义 `n
+            escaped = escaped.replace("\n", "`n")
+            command = f'powershell -Command "Write-Host \"{escaped}\"" | {command}'
         returncode, stdout, stderr = await run_command(
             command, config_data["porject_path"]
         )
