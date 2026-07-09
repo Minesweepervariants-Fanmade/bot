@@ -71,7 +71,7 @@ def parse_log_for_codes(log_path: str):
         _log.error(f"解析日志失败 {log_path}: {e}")
     return board_code, answer_code, rules_list, total, used_r
 
-async def run_command(command: str, cwd=None):
+async def run_command(command: str, cwd=None, input_str: str = None):
     """
     在指定目录下执行命令并返回输出
 
@@ -92,15 +92,26 @@ async def run_command(command: str, cwd=None):
         #     text=True,
         #     shell=isinstance(command, str)  # 如果命令是字符串，则使用shell
         # )
-        process = await asyncio.create_subprocess_shell(
-            command,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
 
         # 获取输出
-        stdout, stderr = await process.communicate()
+        if input_str:
+            process = await asyncio.create_subprocess_shell(
+                command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate(input=input_str.encode('utf-8'))
+        else:
+            process = await asyncio.create_subprocess_shell(
+                command,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+
 
         return process.returncode, stdout.decode("ansi") or " ", stderr.decode("ansi")
 
@@ -1443,14 +1454,8 @@ class MinesVariants(BasePlugin):
                     continue
                 reply_text = reply_msg_part["data"]["text"]
                 break
-        if reply_text:
-            # 转义反引号和双引号（PowerShell 双引号内需要）
-            escaped = reply_text.replace("`", "``").replace('"', '`"')
-            # 将换行符替换为 PowerShell 的换行转义 `n
-            escaped = escaped.replace("\n", "`n")
-            command = f'powershell -Command "Write-Host \"{escaped}\"" | {command}'
         returncode, stdout, stderr = await run_command(
-            command, config_data["porject_path"]
+            command, config_data["porject_path"], input_str=reply_text
         )
         if not stdout:
             await self.api.post_group_msg(msg.group_id, response("command", "running_error") + stderr)
