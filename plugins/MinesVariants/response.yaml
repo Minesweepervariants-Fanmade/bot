@@ -79,11 +79,25 @@ command:
   target_is_admin:
     - "目标用户已经是管理员"
   cmd_fmt:
-    - "格式错误 预期: #op/#deop @xxx"
+    - "格式错误 预期: #op/#deop/#ban/#unban @xxx/UID"
+  target_is_unban:
+    - "目标用户未被ban"
+  target_is_ban:
+    - "目标用户已经被ban"
+  unban_done:
+    - "重新接收目标用户消息"
+  ban_done:
+    - "成功停止接收目标用户任何消息"
+  ban_over_level:
+    - "目标用户拥有管理员/操作员权限, 不支持ban"
+  unknown_level:
+    - "未知的权限等级"
   op_done:
     - "已经设置目标用户为管理员"
   deop_done:
-    - "已经取消目标用户的管理员身份"
+    - "已经取消目标用户的所有权限"
+  user_done:
+    - "已经设置目标用户为操作员"
   running_error:
     - "执行时出了一点小问题呢...不过没关系，我们可以再试试别的办法！(๑•́ ₃ •̀๑)"
     - "遇到了一点小困难...但请放心，我会继续努力的！(ノ﹏ヽ)"
@@ -132,6 +146,21 @@ rules:
     - "注册格式错误 #注册规则 <规则名称> [规则描述]"
   rule_list:
     - "规则列表: https://minesweepervariants-fanmade.github.io/rule/或使用查询规则[#/p0, #/p1, ...]进行浏览"
+
+deepseek:
+  cmd_error:
+    - "格式错误 #ds 规则ID"
+  task_usage:
+    - "有其他进程正在占用deepseek"
+    - "有其他deepseek正在屙"
+  impl_rule:
+    - "deepseek正在实现[{}]"
+  impl_done:
+    - "deepseek屙完了 准备拉到bot"
+    - "deepseek完成规则实现 准备拉取远程库"
+  impl_fail:
+    - "deepseek没屙出来 fwds"
+    - "deepseek实现规则失败 请重试"
 
 # 图片相关
 images:

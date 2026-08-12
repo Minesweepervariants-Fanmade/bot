@@ -6,6 +6,7 @@ import re
 import string
 import subprocess
 import time
+import traceback
 from pathlib import Path
 import socket
 import threading
@@ -23,9 +24,11 @@ from ncatbot.core.api import check_and_log
 from ncatbot.plugin import BasePlugin, CompatibleEnrollment
 from ncatbot.core.message import GroupMessage, PrivateMessage
 from ncatbot.utils import logger
+from typing import Literal
 import json
 
 REG_LOCK = asyncio.Lock()
+RESPONSE_MAP = {}
 
 
 def get_host_ip():
@@ -120,7 +123,12 @@ async def run_command(command: str, cwd=None, input_str: str = None):
 
 
 def response(*key: str) -> str:
-    result = yaml.full_load(open(f"{SELF_PATH}/response.yaml", "r", encoding="utf-8"))
+    global RESPONSE_MAP
+    try:
+        RESPONSE_MAP = yaml.full_load(open(f"{SELF_PATH}/response.yaml", "r", encoding="utf-8"))
+    except Exception as e:
+        _log.warning(f"读取/response.yaml失败: {e}")
+    result = RESPONSE_MAP
     for _key in key:
         result = result[_key]
     if type(result) is list:
@@ -128,21 +136,18 @@ def response(*key: str) -> str:
     return result
 
 
-def update_all_rules():
+def update_all_rules(timeout=20):
     global ALL_RULE
     _log.info("发起更新规则列表")
     for _ in range(6):
         try:
             request = Request()
-            request.run_task("list --json", mode="BIN")
-            request.wait_completion(timeout=10)
-            result = request.get_output().split("\n")[1]
-            json.loads(result)
+            request.run_task(f"list --json -F {SELF_PATH}/rule.json", mode="BIN")
+            request.wait_completion(timeout=timeout)
         except:
+            traceback.print_exc()
             continue
         # print(request.get_output(), result)
-        with open(f"{SELF_PATH}/rule.json", 'w', encoding="utf-8") as f:
-            f.write(result)
         ALL_RULE = []
         return True
     raise ValueError("update all rules failed")
@@ -238,7 +243,7 @@ def split_by_content_length(items, max_len=MAX_LENGTH, chunk_max_length=CHUNK_MA
 
 
 class Request:
-    def __init__(self, max_length=0, _request_id=0):
+    def __init__(self, max_length=0, _request_id=0, task_type:Literal["MINES", "DEEPSEEK"]="MINES"):
         self.mode = None
         self.output_buffer = []
         self.max_length = max_length
@@ -249,6 +254,7 @@ class Request:
         self._lock = threading.Lock()  # 用于保护output_buffer的线程安全
         self._completed = threading.Event()
         self.pid = -1
+        self.task_type = task_type
 
         timestamp = datetime.datetime.now().timestamp()
         dt_object = datetime.datetime.fromtimestamp(timestamp)
@@ -380,6 +386,33 @@ class Request:
 
     def close_connection(self) -> None:
         """关闭连接并停止任务线程"""
+        if self.task_type == "DEEPSEEK":
+            if self.pid == -1:
+                return
+            import psutil
+            try:
+                parent = psutil.Process(self.pid)
+                # 递归杀死所有子进程
+                for child in parent.children(recursive=True):
+                    try:
+                        child.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+                parent.kill()
+            except psutil.NoSuchProcess:
+                pass  # 进程已结束
+            except Exception as e:
+                _log.warning(f"强杀 DEEPSEEK 进程 {self.pid} 失败: {e}")
+            subprocess.run(
+                "stop.bat",
+                cwd="D:\\0.0\\lib\\ds-browser",
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=None,
+            )
+            self.pid = -1  # 重置
+            self._completed.set()
+            return
         self._should_stop.set()
 
         # 关闭socket中断阻塞操作
@@ -405,6 +438,31 @@ class Request:
 
     def get_output(self) -> str:
         """获取当前输出内容（线程安全）"""
+        if self.task_type == "DEEPSEEK":
+            # 从配置读取日志目录，如果没有则给个默认（但强烈建议你在 data.yaml 里配置）
+            log_dir = config_data.get("deepseek_log_path", "D:\\0.0\\lib\\my_python\\dsBrowser")
+            main_log = os.path.join(log_dir, "logs\\latest.log")
+            test_log = os.path.join(log_dir, "logs\\latest-test.log")
+
+            # 其余逻辑不变
+            main_exists = os.path.exists(main_log)
+            test_exists = os.path.exists(test_log)
+            if not main_exists:
+                return "[日志文件尚未生成]"
+
+            content = ""
+            if main_exists:
+                with open(main_log, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+
+            if test_exists:
+                main_mtime = os.path.getmtime(main_log) if main_exists else 0
+                test_mtime = os.path.getmtime(test_log)
+                if test_mtime > main_mtime:
+                    with open(test_log, "r", encoding="utf-8", errors="ignore") as f:
+                        test_content = f.read()
+                    content = content + "\n" + test_content
+            return content
         with self._lock:
             if self.mode == "LINE":
                 return '\n'.join(self.output_buffer)
@@ -426,6 +484,8 @@ class MinesVariants(BasePlugin):
 
     @bot.private_event()
     async def on_private_event(self, msg: PrivateMessage):
+        if int(msg.user_id) in self.data["ban"]:
+            return
         try:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
@@ -473,7 +533,8 @@ class MinesVariants(BasePlugin):
                     await self.pull(msg)
                 case "#update":
                     await self.api.post_private_msg(msg.user_id, response("categories", "update_start"))
-                    if update_all_rules():
+                    timeout = int(command[1]) if len(command) > 1 else None
+                    if update_all_rules(timeout):
                         await self.api.post_private_msg(msg.user_id, response("categories", "update_end"))
                     else:
                         await self.api.post_private_msg(msg.user_id, response("categories", "update_fail"))
@@ -495,6 +556,8 @@ class MinesVariants(BasePlugin):
 
     @bot.group_event()
     async def on_group_event(self, msg: GroupMessage):
+        if int(msg.user_id) in self.data["ban"]:
+            return
         try:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
             command: list[str] = raw_message.split()
@@ -527,7 +590,8 @@ class MinesVariants(BasePlugin):
                         )
                 case "#update":
                     await self.api.post_group_msg(msg.group_id, response("categories", "update_start"))
-                    if update_all_rules():
+                    timeout = int(command[1]) if len(command) > 1 else 20
+                    if update_all_rules(timeout):
                         await self.api.post_group_msg(msg.group_id, response("categories", "update_end"))
                     else:
                         await self.api.post_group_msg(msg.group_id, response("categories", "update_fail"))
@@ -594,33 +658,62 @@ class MinesVariants(BasePlugin):
                 case "#op":
                     if "admin" not in self.data:
                         self.data["admin"] = [3140864122]
+                    if "user" not in self.data:
+                        self.data["user"] = []
                     if msg.user_id not in self.data["admin"]:
                         await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
                         return
-                    if len(msg.message) < 2:
+                    if len(command) > 1 and command[1].isdigit():
+                        target = int(command[1])
+                        level: str = command[2] if len(command) > 2 else "2"
+                    elif len(msg.message) < 2:
                         await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
                         return
-                    target = msg.message[1]
-                    if target.get("type", None) != "at":
-                        await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
-                        return
-                    target = int(target["data"]["qq"])
-                    if target in self.data["admin"]:
-                        await self.api.post_group_msg(msg.group_id, response("command", "target_is_admin"))
-                        return
-                    self.data["admin"].append(target)
-                    await self.api.post_group_msg(msg.group_id, response("command", "op_done"))
+                    else:
+                        target = msg.message[1]
+                        if target.get("type", None) != "at":
+                            await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
+                            return
+                        target = int(target["data"]["qq"])
+                        level: str = msg.message[2]["data"]["text"] if len(msg.message) > 2 else "2"
+                    level = level.strip() or "2"
+                    if level == "0":
+                        if target in self.data["admin"]:
+                            self.data["admin"].remove(target)
+                        if target in self.data["user"]:
+                            self.data["user"].remove(target)
+                        await self.api.post_group_msg(msg.group_id, response("command", "deop_done"))
+                    elif level == "1":
+                        if target in self.data["admin"]:
+                            self.data["admin"].remove(target)
+                        if target not in self.data["user"]:
+                            self.data["user"].append(target)
+                        await self.api.post_group_msg(msg.group_id, response("command", "user_done"))
+                    elif level == "2":
+                        if target in self.data["user"]:
+                            self.data["user"].remove(target)
+                        if target not in self.data["admin"]:
+                            self.data["admin"].append(target)
+                        await self.api.post_group_msg(msg.group_id, response("command", "op_done"))
+                    else:
+                        await self.api.post_group_msg(msg.group_id, response("command", "unknown_level"))
+                    return
                 case "#deop":
                     if "admin" not in self.data:
                         self.data["admin"] = [3140864122]
-                    if len(msg.message) < 2:
+                    if "user" not in self.data:
+                        self.data["user"] = []
+                    if len(command) > 1 and command[1].isdigit():
+                        target = int(command[1])
+                    elif len(msg.message) < 2:
                         await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
                         return
-                    target = msg.message[1]
-                    if target.get("type", None) != "at":
-                        await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
-                        return
-                    target = int(target["data"]["qq"])
+                    else:
+                        target = msg.message[1]
+                        if target.get("type", None) != "at":
+                            await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
+                            return
+                        target = int(target["data"]["qq"])
                     if target == 3140864122:
                         await self.api.post_group_msg(msg.group_id, response("command", "target_is_master"))
                         return
@@ -642,6 +735,77 @@ class MinesVariants(BasePlugin):
                     message_id = msg.message[0]["data"]["id"]
                     await self.api.delete_msg(message_id)
                     await self.api.delete_msg(msg.message_id)
+                case "#ban":
+                    if len(command) > 1 and command[1].isdigit():
+                        target = int(command[1])
+                    elif len(msg.message) < 2:
+                        await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
+                        return
+                    else:
+                        target = msg.message[1]
+                        if target.get("type", None) != "at":
+                            await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
+                            return
+                        target = int(target["data"]["qq"])
+                    if target in self.data["ban"]:
+                        await self.send_message(msg, response("command", "target_is_ban"))
+                        return
+                    if target in self.data["user"] + self.data["admin"]:
+                        await self.send_message(msg, response("command", "ban_over_level"))
+                        return
+                    self.data["ban"].append(target)
+                    await self.send_message(msg, response("command", "ban_done"))
+                case "#unban":
+                    if len(command) > 1 and command[1].isdigit():
+                        target = int(command[1])
+                    elif len(msg.message) < 2:
+                        await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
+                        return
+                    else:
+                        target = msg.message[1]
+                        if target.get("type", None) != "at":
+                            await self.api.post_group_msg(msg.group_id, response("command", "cmd_fmt"))
+                            return
+                        target = int(target["data"]["qq"])
+                    if target not in self.data["ban"]:
+                        await self.send_message(msg, response("command", "target_is_unban"))
+                        return
+                    self.data["ban"].remove(target)
+                    await self.api.post_group_msg(msg.group_id, response("command", "unban_done"))
+                    return
+                case "#ds":
+                    if (
+                        msg.user_id not in self.data["user"] and
+                        msg.user_id not in self.data["admin"]
+                    ):
+                        await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
+                        return
+                    if len(command) == 1:
+                        await self.api.post_group_msg(msg.group_id, response("deepseek", "cmd_error"))
+                        return
+                    rule_id = command[1]
+                    rule_todo: list[dict] = json.load(
+                        open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.json", "r", encoding="utf-8")
+                    )
+                    if len([None for rule in rule_todo if rule["name"] == rule_id]) == 0:
+                        await self.api.post_group_msg(msg.group_id, response("prompts", "rule_not_found"))
+                        return
+
+                    self.data["id"] += 1
+                    self.data.save()
+                    request_map[self.data["id"]] = Request(
+                        max_length=50, _request_id=self.data["id"],
+                        task_type="DEEPSEEK"
+                    )
+                    request_map[self.data["id"]].nickname = msg.sender.nickname
+                    threading.Thread(
+                        target=self.thread_deepseek, daemon=True,
+                        args=(msg, command[:], request_map[self.data["id"]])
+                    ).start()
+                    await self.api.post_group_msg(
+                        msg.group_id, response("task", "created").format(self.data["id"])
+                    )
+                    return
                 case "#":  # 综合
                     await self.shape(msg)
                     return
@@ -991,8 +1155,6 @@ class MinesVariants(BasePlugin):
             loop.close()
 
         threading.Thread(target=start_hint, daemon=True).start()
-
-
 
     async def __get_hint(self, msg: PrivateMessage | GroupMessage, hint_id: str = None):
         if not hint_id:
@@ -1652,41 +1814,6 @@ class MinesVariants(BasePlugin):
         await self.send_message(msg, response("rules", "rule_list"))
         return
 
-        # self.all_rule()
-        # all_rule: list[list[str | dict] | str] = []
-        # for index in range(3):
-        #     all_rule.append([
-        #         response("categories", "left_rules_title"),
-        #         response("categories", "middle_rules_title"),
-        #         response("categories", "right_rules_title"),
-        #     ][index])
-        #     result = []
-        #     for rule in ALL_RULE[index]:
-        #         rule_doc: dict = rule["doc"]
-        #         result.append(rule_doc)
-        #     # if len(result) > 100:
-        #     #     result = [result[i:i + 100] for i in range(0, len(result), 100)]
-        #     result = split_by_content_length(result, chunk_max_length=50)
-        #     all_rule.extend(result)
-        #
-        # all_rule += [response("categories", "todo_rules_title")]
-        #
-        # result = []
-        #
-        # for rule in ALL_RULE[3]:
-        #     result.append(rule["doc"])
-        # # if len(result) > 100:
-        # #     result = [result[i:i + 100] for i in range(0, len(result), 100)]
-        # result = split_by_content_length(result, chunk_max_length=50)
-        # all_rule.extend(result)
-        #
-        # json.dump(all_rule, open(f"{SELF_PATH}/tmp.json", "w"), indent=4, ensure_ascii=False)
-        #
-        # await self.send_group_forward_msg_text(
-        #     all_rule, msg,
-        #     # source=response("categories", "rules_list")
-        # )
-
     def all_rule(self) -> list[list[dict[str, list[str] | dict | str]]]:
         """
         :return: [{"name": ["a", "b", ...], "doc": "..." | {msg}}, ...], ...
@@ -2042,6 +2169,10 @@ class MinesVariants(BasePlugin):
         if result == "":
             await self.send_message(msg, "终端输出为空")
             return
+        if request_map[query_id].task_type == "DEEPSEEK":
+            forcibly = True
+            log_text = result
+            result = ""
         if not forcibly:
             reply_text = ""
             if "生成用时" in log_text:
@@ -2072,6 +2203,8 @@ class MinesVariants(BasePlugin):
         return
 
     def _query_thread(self, query_id):
+        if request_map[query_id].task_type == "DEEPSEEK":
+            return ""
         result = request_map[query_id].get_output()
         log_file_name = config_data["log_path"] + "\\" + str(query_id) + ".log"
         if os.path.exists(log_file_name):
@@ -2350,3 +2483,60 @@ class MinesVariants(BasePlugin):
             )
 
         del request_map[request.request_id]
+
+    def thread_deepseek(self, msg, command, request):
+        # 创建新事件循环
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self.deepseek_summon(msg, command, request))
+        loop.close()
+
+    async def deepseek_summon(self, msg, command, request: Request):
+        rule_id = command[1]
+        rule_todo: list[dict] = json.load(
+            open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.json", "r", encoding="utf-8")
+        )
+        rule_data = [
+            rule for rule in rule_todo
+            if rule["name"] == rule_id
+        ][0]
+        todo_rule_fmt = response("categories", "todo_rule_fmt")
+        rule_content = todo_rule_fmt.format(
+            rule_data["name"], rule_data["doc"],
+            rule_data["author_name"], rule_data["author_uid"],
+            time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(rule_data["time"]))
+        )
+
+        process = await asyncio.create_subprocess_shell(
+            "save_rule.bat",
+            cwd="D:\\0.0\\lib\\ds-browser",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE,
+        )
+        await process.communicate(input=rule_content.encode('utf-8'))
+        if process.returncode != 0:
+            await self.send_message(msg, response("deepseek", "task_usage"))
+            del request_map[request.request_id]
+            return
+
+        process = await asyncio.create_subprocess_shell(
+            "run.bat" + ("-u" if "-u" in command else ""),
+            cwd="D:\\0.0\\lib\\ds-browser",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            stdin=None,
+        )
+        request.pid = process.pid
+        request.data = response("deepseek", "impl_rule").format(rule_id)
+
+        await process.wait()
+        if request.request_id not in request_map:
+            return
+        if process.returncode != 0:
+            await self.send_message(msg, response("deepseek", "impl_fail"), reply=msg.message_id)
+        else:
+            await self.send_message(msg, response("deepseek", "impl_done"), reply=msg.message_id)
+            await self.pull(msg)
+        del request_map[request.request_id]
+
