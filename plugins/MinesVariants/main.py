@@ -756,7 +756,7 @@ class MinesVariants(BasePlugin):
                     if target in self.data["ban"]:
                         await self.send_message(msg, response("command", "target_is_ban"))
                         return
-                    if target in self.data["user"] + self.data["admin"]:
+                    if target in (self.data["user"] + self.data["admin"]):
                         await self.send_message(msg, response("command", "ban_over_level"))
                         return
                     self.data["ban"].append(target)
@@ -2118,7 +2118,7 @@ class MinesVariants(BasePlugin):
             if query_id not in request_map:
                 kill_list.remove(query_id)
                 continue
-            if msg.sender.user_id not in self.data["admin"]:
+            if msg.sender.user_id not in (self.data["admin"] + self.data["user"]):
                 if request_map[query_id].nickname != msg.sender.nickname:
                     continue
             request = request_map[query_id]
