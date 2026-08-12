@@ -703,6 +703,9 @@ class MinesVariants(BasePlugin):
                         self.data["admin"] = [3140864122]
                     if "user" not in self.data:
                         self.data["user"] = []
+                    if msg.user_id not in self.data["admin"]:
+                        await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
+                        return
                     if len(command) > 1 and command[1].isdigit():
                         target = int(command[1])
                     elif len(msg.message) < 2:
@@ -736,6 +739,9 @@ class MinesVariants(BasePlugin):
                     await self.api.delete_msg(message_id)
                     await self.api.delete_msg(msg.message_id)
                 case "#ban":
+                    if msg.user_id not in self.data["admin"]:
+                        await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
+                        return
                     if len(command) > 1 and command[1].isdigit():
                         target = int(command[1])
                     elif len(msg.message) < 2:
@@ -756,6 +762,9 @@ class MinesVariants(BasePlugin):
                     self.data["ban"].append(target)
                     await self.send_message(msg, response("command", "ban_done"))
                 case "#unban":
+                    if msg.user_id not in self.data["admin"]:
+                        await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
+                        return
                     if len(command) > 1 and command[1].isdigit():
                         target = int(command[1])
                     elif len(msg.message) < 2:
