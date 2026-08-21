@@ -409,6 +409,7 @@ class Request:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=None,
+                shell=True
             )
             self.pid = -1  # 重置
             self._completed.set()
