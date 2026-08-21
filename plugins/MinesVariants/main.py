@@ -1483,7 +1483,7 @@ class MinesVariants(BasePlugin):
                 else:
                     await self.send_message(msg, response("categories", "todo_rule_create").format(name))
             else:
-                await self.send_message(msg, response("categories", "todo_rule_del").format(name))
+                await self.send_message(msg, response("categories", "todo_rule_del").format(name, _doc))
 
             # 5. 刷新内存规则
             ALL_RULE.clear()
