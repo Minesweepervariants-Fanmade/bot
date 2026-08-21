@@ -11,7 +11,7 @@ from pathlib import Path
 import socket
 import threading
 import datetime
-from typing import Union, Optional
+from typing import Union, Optional, Callable, Any, Awaitable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import psutil
@@ -637,6 +637,9 @@ class MinesVariants(BasePlugin):
                         await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
                         return
                     await self.command(' '.join(command[1:]), msg)
+                case "#修改名字" | "#rename":
+                    await self.todo_rule_rename(msg, command)
+                    return
                 case "#修改作者" | "#chown":
                     uid = msg.sender.user_id
                     if uid not in self.data["admin"]:
@@ -866,6 +869,88 @@ class MinesVariants(BasePlugin):
             # 如果不是数字就是查询规则
             await self.search_rule(msg, [""] + command)
 
+    async def todo_rule_rename(self, msg: PrivateMessage | GroupMessage, command: list[str] = None):
+        if command is None:
+            raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
+            command: list[str] = raw_message.split()
+
+        if len(command) < 3:
+            await self.send_message(msg, "格式错误： #rename <规则ID> <目标规则ID>")
+            return
+
+        # 读取规则文件（需要重新读取，因为 push_todo_rule 已同步远程，可能更新过）
+        repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
+        json_path = os.path.join(repo_path, "ruleTodo.json")
+        image_dir = os.path.join(repo_path, "image")
+
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                rule_todo = json.load(f)
+        except Exception as e:
+            await self.send_message(msg, f"读取规则文件失败: {e}")
+            return ""  # 返回空会取消提交
+
+        rule_id = command[1]
+        target_rule_id = command[2]
+
+        # 查找源规则
+        source_rule = None
+        for rule in rule_todo:
+            if rule["name"] == rule_id:
+                source_rule = rule
+                break
+        if source_rule is None:
+            await self.send_message(msg, f"未找到规则ID: {rule_id}")
+            return ""
+
+        # 权限检查
+        if msg.user_id not in self.data.get("admin", []) and source_rule["author_uid"] != msg.user_id:
+            await self.send_message(msg, response("categories", "todo_rule_unauthor"))
+            return ""
+        if rule_id == target_rule_id:
+            await self.send_message(msg, "源规则名和目标规则名相同，无需修改")
+            return
+
+        async def callback() -> str:
+            # 检查目标是否被占用（排除自身）
+            for _rule in rule_todo:
+                if _rule["name"] == target_rule_id and _rule is not source_rule:
+                    await self.send_message(msg, f"目标规则名 '{target_rule_id}' 已被占用")
+                    return ""
+
+            # 处理图片重命名
+            old_image = source_rule.get("image")
+            if old_image:
+                old_path = os.path.join(image_dir, old_image)
+                new_image_name = get_rule_image(target_rule_id) + ".png"
+                new_path = os.path.join(image_dir, new_image_name)
+                if os.path.exists(old_path):
+                    if old_image != new_image_name:
+                        try:
+                            os.replace(old_path, new_path)
+                            source_rule["image"] = new_image_name
+                        except Exception as e:
+                            await self.send_message(msg, f"重命名图片失败: {e}")
+                            return ""
+
+            # 修改名称并更新时间
+            source_rule["name"] = target_rule_id
+            source_rule["time"] = time.time()
+
+            # 保存 JSON
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(rule_todo, f, ensure_ascii=False, indent=4)
+
+            # 发送成功消息（在回调中完成，确保在提交前发送）
+            await self.send_message(msg, f"规则已从 [{rule_id}] 重命名为 [{target_rule_id}]")
+            return f"rename: 规则 [{rule_id}] -> [{target_rule_id}] 由 {msg.sender.nickname}"
+
+        # 执行推送
+        await self.push_todo_rule(callback, msg)
+
+        ALL_RULE.clear()
+        self.all_rule()
+
     async def chown(self, msg: PrivateMessage | GroupMessage, command: list[str] = None):
         if command is None:
             raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
@@ -888,75 +973,87 @@ class MinesVariants(BasePlugin):
             await self.send_message(msg, "规则暂存文件不存在，请联系管理员")
             return
 
-        with open(todo_path, "r", encoding="utf-8") as f:
-            rule_todo = json.load(f)
+        async def callback() -> str:
+            # 读取规则文件（重新读取，确保最新）
+            with open(todo_path, "r", encoding="utf-8") as f:
+                rule_todo = json.load(f)
 
-        # 查找目标规则
-        target_rule = None
-        for rule in rule_todo:
-            if rule["name"] == rule_id:
-                target_rule = rule
-                break
+            target_rule = None
+            for rule in rule_todo:
+                if rule["name"] == rule_id:
+                    target_rule = rule
+                    break
+            if target_rule is None:
+                await self.send_message(msg, f"未找到规则ID: {rule_id}")
+                return ""
 
-        if target_rule is None:
-            await self.send_message(msg, f"未找到规则ID: {rule_id}")
-            return
+            old_name = target_rule["author_name"]
+            old_uid = target_rule["author_uid"]
 
-        # 记录旧信息用于回复
-        old_name = target_rule["author_name"]
-        old_uid = target_rule["author_uid"]
+            # 修改作者
+            target_rule["author_name"] = new_author_name
+            if new_author_uid is not None:
+                target_rule["author_uid"] = new_author_uid
 
-        # 修改作者
-        target_rule["author_name"] = new_author_name
-        if new_author_uid is not None:
-            target_rule["author_uid"] = new_author_uid
+            # 保存文件
+            with open(todo_path, "w", encoding="utf-8") as f:
+                json.dump(rule_todo, f, ensure_ascii=False, indent=4)
 
-        # 1. 同步远程（保持已有逻辑）
-        repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
-        await run_command('git fetch origin doc', cwd=repo_path)
-        ret, _, err = await run_command('git reset --hard origin/doc', cwd=repo_path)
-        if ret != 0:
-            await self.send_message(msg, "同步远程失败")
-            return
+            # 发送消息
+            await self.send_message(msg, f"规则 [{rule_id}] 的作者已修改为 {new_author_name}" +
+                                    (f"(QQ: {new_author_uid})" if new_author_uid else ""))
 
-        # 保存文件
-        with open(todo_path, "w", encoding="utf-8") as f:
-            json.dump(rule_todo, f, ensure_ascii=False, indent=4)
+            return f"chown: 修改规则 [{rule_id}] 作者从 {old_name}({old_uid}) 为 {new_author_name}({new_author_uid})"
 
-        await self.send_message(msg, f"规则 [{rule_id}] 的作者已修改为 {new_author_name}" +
-                                (f"(QQ: {new_author_uid})" if new_author_uid else ""))
-
-        # Git 提交推送（参考 register_rules 的实现）
-        repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
-
-        # 添加变更
-        await run_command('git add ruleTodo.json', cwd=repo_path)
-
-        # 提交
-        commit_msg = f"chown: 修改规则 [{rule_id}] 作者从 {old_name}({old_uid}) 为 {new_author_name}({new_author_uid})"
-        ret, _, _ = await run_command(f'git commit -m "{commit_msg}"', cwd=repo_path)
-        if ret != 0:
-            await self.send_message(msg, "无内容变更或提交失败")
-            return
-
-        # 推送
-        ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
-        if ret != 0:
-            # 尝试拉取再推送
-            await run_command('git pull --rebase origin doc', cwd=repo_path)
-            ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
-            if ret != 0:
-                await self.send_message(msg, "推送失败，请手动检查")
-                return
-
-        # 更新本地记录的远程哈希（可选）
-        ret, hash_out, _ = await run_command('git rev-parse origin/doc', cwd=repo_path)
-        if ret == 0 and hash_out:
-            self.data["last_remote_hash_doc"] = hash_out.strip()
-            await self.send_message(msg, "规则文件已推送到远端仓库。")
+        await self.push_todo_rule(callback, msg)
 
         ALL_RULE.clear()
         self.all_rule()
+
+    async def push_todo_rule(
+        self, callback: Callable[[], Awaitable[str]],
+        msg: PrivateMessage | GroupMessage
+    ):
+        repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
+
+        async with REG_LOCK:
+            # 1. 同步远程（保持已有逻辑）
+            await run_command('git fetch origin doc', cwd=repo_path)
+            ret, _, err = await run_command('git reset --hard origin/doc', cwd=repo_path)
+            if ret != 0:
+                await self.send_message(msg, "同步远程失败")
+                return
+
+            commit_msg = await callback()
+
+            # 5. 刷新内存规则
+            ALL_RULE.clear()
+            self.all_rule()
+
+            # 6. Git 添加所有变更（包括新增、修改、删除）
+            #    使用 -A 自动处理所有状态
+            await run_command('git add -A', cwd=repo_path)
+
+            # 7. 提交
+            ret, _, _ = await run_command(f'git commit -m "{commit_msg}"', cwd=repo_path)
+            if ret != 0:
+                await self.send_message(msg, "无内容变更，跳过推送")
+                return
+
+            # 8. 推送（保留你的冲突处理）
+            ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+            if ret != 0:
+                await run_command('git pull --rebase origin doc', cwd=repo_path)
+                ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
+                if ret != 0:
+                    await self.send_message(msg, "推送失败，请手动检查")
+                    return
+
+            # 9. 更新 hash
+            ret, hash_out, _ = await run_command('git rev-parse origin/doc', cwd=repo_path)
+            if ret == 0 and hash_out:
+                self.data["last_remote_hash_doc"] = hash_out.strip()
+                await self.send_message(msg, "规则文件已推送到远端仓库。")
 
     async def get_hint(self, msg: PrivateMessage | GroupMessage, hint_id: str = None):
         raw_message = ''.join([i["data"]["text"] for i in msg.message if i["type"] == "text"]).strip()
@@ -1446,14 +1543,7 @@ class MinesVariants(BasePlugin):
         image_name = get_rule_image(name) + ".png"
         image_path = os.path.join(image_dir, image_name)
 
-        async with REG_LOCK:
-            # 1. 同步远程（保持已有逻辑）
-            await run_command('git fetch origin doc', cwd=repo_path)
-            ret, _, err = await run_command('git reset --hard origin/doc', cwd=repo_path)
-            if ret != 0:
-                await self.send_message(msg, "同步远程失败")
-                return
-
+        async def callback():
             # 2. 处理图片（根据场景决定是添加、替换还是删除）
             if doc and _response and _response.status_code == 200:
                 # 更新规则并提供了新图片 → 保存新图片
@@ -1485,35 +1575,9 @@ class MinesVariants(BasePlugin):
             else:
                 await self.send_message(msg, response("categories", "todo_rule_del").format(name, _doc))
 
-            # 5. 刷新内存规则
-            ALL_RULE.clear()
-            self.all_rule()
+            return f"User[{msg.sender.nickname}] " + ('update' if doc else 'delete') + f' RULE[{name}]'
 
-            # 6. Git 添加所有变更（包括新增、修改、删除）
-            #    使用 -A 自动处理所有状态
-            await run_command('git add -A', cwd=repo_path)
-
-            # 7. 提交
-            commit_msg = f"User[{msg.sender.nickname}] " + ('update' if doc else 'delete') + f' RULE[{name}]'
-            ret, _, _ = await run_command(f'git commit -m "{commit_msg}"', cwd=repo_path)
-            if ret != 0:
-                await self.send_message(msg, "无内容变更，跳过推送")
-                return
-
-            # 8. 推送（保留你的冲突处理）
-            ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
-            if ret != 0:
-                await run_command('git pull --rebase origin doc', cwd=repo_path)
-                ret, _, _ = await run_command('git push origin doc', cwd=repo_path)
-                if ret != 0:
-                    await self.send_message(msg, "推送失败，请手动检查")
-                    return
-
-            # 9. 更新 hash
-            ret, hash_out, _ = await run_command('git rev-parse origin/doc', cwd=repo_path)
-            if ret == 0 and hash_out:
-                self.data["last_remote_hash_doc"] = hash_out.strip()
-                await self.send_message(msg, "规则文件已推送到远端仓库。")
+        await self.push_todo_rule(callback, msg)
 
     async def pull(self, msg):
         await self.send_message(msg, "开始拉取远程库")
