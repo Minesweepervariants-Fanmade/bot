@@ -1868,6 +1868,10 @@ class MinesVariants(BasePlugin):
                 content = f'[{rule_dict["id"]}]'
                 content += f'{rule_dict["name"].get("zh_CN", rule_dict["name"].get("default", ""))}'
                 content += f': {rule_dict["doc"].get("zh_CN", rule_dict["doc"].get("default", "空描述"))}'
+                if author['name'] or (author['id'].isdigit() and (int(author['id']) > 1)):
+                    content += f"\n作者:{author['name']} ({author['id']})"
+                if rule_dict['creation_time']:
+                    content += f"\n时间:{rule_dict['creation_time']}"
                 rule_data["doc"]["content"] = content
                 rules_list[-1].append(rule_data)
         rule_todo_list = json.load(open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.json", "r", encoding="utf-8"))
