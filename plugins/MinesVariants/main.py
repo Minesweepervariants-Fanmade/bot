@@ -1348,7 +1348,6 @@ class MinesVariants(BasePlugin):
             # print("quit", flush=True)
 
             request.wait_completion()
-            del request_map[request_id]
 
             images_path = []
             log_path = config_data["log_path"] + "\\" + file_name + ".log"
@@ -1394,11 +1393,13 @@ class MinesVariants(BasePlugin):
                 request.close_connection()
                 return
             _log.info(f"hint: 共{len(base64_contents)}份图片待发送")
+            request.data = f"正在发送{len(base64_contents)}份图片"
             if isinstance(msg, GroupMessage):
                 await self.send_group_forward_msg_image(base64_contents, msg, summary=None)
             elif isinstance(msg, PrivateMessage):
                 await self.send_private_forward_msg_image(base64_contents, msg, summary=None)
 
+            del request_map[request_id]
             request.close_connection()
             for image_path in images_path:
                 Path(image_path).unlink(missing_ok=True)
