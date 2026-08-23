@@ -442,7 +442,7 @@ class Request:
         if self.task_type == "DEEPSEEK":
             # 从配置读取日志目录，如果没有则给个默认（但强烈建议你在 data.yaml 里配置）
             log_dir = config_data.get("deepseek_log_path", "D:\\0.0\\lib\\my_python\\dsBrowser")
-            main_log = os.path.join(log_dir, "logs\\latest.log")
+            main_log = os.path.join(log_dir, "logs\\latest-main.log")
             test_log = os.path.join(log_dir, "logs\\latest-test.log")
 
             # 其余逻辑不变
@@ -457,12 +457,9 @@ class Request:
                     content = f.read()
 
             if test_exists:
-                main_mtime = os.path.getmtime(main_log) if main_exists else 0
-                test_mtime = os.path.getmtime(test_log)
-                if test_mtime > main_mtime:
-                    with open(test_log, "r", encoding="utf-8", errors="ignore") as f:
-                        test_content = f.read()
-                    content = content + "\n" + test_content
+                with open(test_log, "r", encoding="utf-8", errors="ignore") as f:
+                    test_content = f.read()
+                content = content + "\n" + test_content
             return content
         with self._lock:
             if self.mode == "LINE":
