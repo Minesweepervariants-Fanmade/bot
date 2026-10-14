@@ -1859,11 +1859,17 @@ class MinesVariants(BasePlugin):
                     ):
                         result.append(rule_doc)
         result_length = len(result)
-        page_length = 75
         if on_random:
             result = random.sample(result, k=min(on_random, len(result)))
+        # 按内容长度分页：/pN 挑选第 N 块
         if page > -1:
-            result = result[page * page_length: (page + 1) * page_length]
+            chunks = split_by_content_length(result)
+            if page > -1:
+                result = chunks[page] if 0 <= page < len(chunks) else []
+            elif len(chunks) == 1:
+                result = chunks[0]
+            else:
+                result = chunks
         if (page < 0) and ((result_length if on_random == 0 else on_random) > 100):
             # result = [result[i:i + page_length] for i in range(0, len(result), page_length)]
             result = split_by_content_length(result)
