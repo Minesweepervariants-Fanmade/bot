@@ -11,9 +11,11 @@ import threading
 
 import yaml
 from ncatbot.core.api import check_and_log
+from ncatbot.core.message import GroupMessage, PrivateMessage
 from ncatbot.plugin import BasePlugin, CompatibleEnrollment
 
 from .core.config import SELF_PATH, response, request_map, _log, cfg
+from .core.schema import Msg
 from .core.hints import HintsMixin
 from .core.messaging import MessagingMixin
 from .core.permissions import (
@@ -31,7 +33,7 @@ from .core.tasks import TasksMixin
 bot = CompatibleEnrollment
 
 
-def _raw_text(msg) -> str:
+def _raw_text(msg: Msg) -> str:
     return "".join(i["data"]["text"] for i in msg.message if i["type"] == "text").strip()
 
 
@@ -42,7 +44,7 @@ class MinesVariantsV2(
     version = "2.1.0"
 
     # ---------------- 生命周期 ----------------
-    async def on_load(self):
+    async def on_load(self) -> None:
         if self.data.get("id") is None:
             self.data["id"] = 0
         self.init_levels()
@@ -50,14 +52,14 @@ class MinesVariantsV2(
 
     # ---------------- 事件入口 ----------------
     @bot.private_event()
-    async def on_private_event(self, msg):
+    async def on_private_event(self, msg: PrivateMessage) -> None:
         await self._handle(msg, is_group=False)
 
     @bot.group_event()
-    async def on_group_event(self, msg):
+    async def on_group_event(self, msg: GroupMessage) -> None:
         await self._handle(msg, is_group=True)
 
-    async def _handle(self, msg, is_group: bool):
+    async def _handle(self, msg: Msg, is_group: bool) -> None:
         if self.is_banned(msg.user_id):
             return
         try:
@@ -77,7 +79,9 @@ class MinesVariantsV2(
                     pass
 
     # ---------------- 命令分发 ----------------
-    async def _dispatch(self, msg, command, raw_message, is_group: bool):
+    async def _dispatch(
+        self, msg: Msg, command: list[str], raw_message: str, is_group: bool
+    ) -> None:
         head = command[0]
 
         if head in ("#生成", "#sc", "#summon", "#run"):
@@ -164,7 +168,9 @@ class MinesVariantsV2(
             await self.shape(msg, raw_message[1:].split())
 
     # ---------------- 各命令实现 ----------------
-    async def _start_generate(self, msg, command, is_group):
+    async def _start_generate(
+        self, msg: Msg, command: list[str], is_group: bool
+    ) -> None:
         self.data["id"] += 1
         self.data.save()
         rid = self.data["id"]
@@ -176,7 +182,7 @@ class MinesVariantsV2(
         poster = self.api.post_group_msg if is_group else self.api.post_private_msg
         await poster(target, response("task", "created").format(rid))
 
-    async def _start_deepseek(self, msg, command):
+    async def _start_deepseek(self, msg: GroupMessage, command: list[str]) -> None:
         if not self.is_user(msg.user_id):
             await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
             return
@@ -198,7 +204,9 @@ class MinesVariantsV2(
         threading.Thread(target=self.thread_deepseek, daemon=True, args=(msg, command[:], req)).start()
         await self.api.post_group_msg(msg.group_id, response("task", "created").format(rid))
 
-    async def _do_update(self, msg, command, is_group):
+    async def _do_update(
+        self, msg: Msg, command: list[str], is_group: bool
+    ) -> None:
         target = msg.group_id if is_group else msg.user_id
         poster = self.api.post_group_msg if is_group else self.api.post_private_msg
         await poster(target, response("categories", "update_start"))
@@ -206,7 +214,7 @@ class MinesVariantsV2(
         ok = update_all_rules(timeout)
         await poster(target, response("categories", "update_end") if ok else response("categories", "update_fail"))
 
-    async def _send_help(self, msg, is_group):
+    async def _send_help(self, msg: Msg, is_group: bool) -> None:
         try:
             with open(f"{SELF_PATH}/help.yaml", "r", encoding="utf-8") as f:
                 help_text = yaml.full_load(f)
@@ -223,7 +231,9 @@ class MinesVariantsV2(
             poster = self.api.post_group_msg if is_group else self.api.post_private_msg
             await poster(target, response("forward", "help_unavailable"))
 
-    async def _register(self, msg, command, raw_message):
+    async def _register(
+        self, msg: GroupMessage, command: list[str], raw_message: str
+    ) -> None:
         if len(command) > 2:
             rule_doc = raw_message.split(" ", 2)[-1]
             await self.register_rules(msg, command[1], rule_doc)
@@ -233,13 +243,13 @@ class MinesVariantsV2(
             await self.api.post_group_msg(msg.group_id, response("rules", "register_fmt_error"))
 
     # ---------------- 权限命令 ----------------
-    async def _require_admin(self, msg) -> bool:
+    async def _require_admin(self, msg: Msg) -> bool:
         if not self.is_admin(msg.user_id):
             await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
             return False
         return True
 
-    def _parse_target(self, msg, command):
+    def _parse_target(self, msg: Msg, command: list[str]) -> int | None:
         """解析被操作用户：优先数字参数，其次 at 段。返回 None 表示格式错误。"""
         if len(command) > 1 and command[1].isdigit():
             return int(command[1])
@@ -247,7 +257,7 @@ class MinesVariantsV2(
             return int(msg.message[1]["data"]["qq"])
         return None
 
-    def _parse_level(self, msg, command) -> int:
+    def _parse_level(self, msg: Msg, command: list[str]) -> int:
         """解析等级参数（默认 2=admin）。数字参数在 command[2]，at 场景在 message[2]。"""
         raw = None
         if len(command) > 1 and command[1].isdigit() and len(command) > 2:
@@ -262,7 +272,7 @@ class MinesVariantsV2(
         # 兼容旧写法：名字
         return {"ban": BAN, "normal": NORMAL, "user": USER, "admin": ADMIN}.get(raw.lower(), ADMIN)
 
-    async def _op(self, msg, command):
+    async def _op(self, msg: GroupMessage, command: list[str]) -> None:
         """#op <@用户|QQ> <等级>
 
         等级：-1=ban, 0=普通, 1=user, 2=admin（默认 2）
@@ -296,7 +306,9 @@ class MinesVariantsV2(
             f"{text}\n{target}: {level_name(old)}({old}) -> {level_name(level)}({level})",
         )
 
-    async def _set_level_cmd(self, msg, command, level: int, done_key: str):
+    async def _set_level_cmd(
+        self, msg: Msg, command: list[str], level: int, done_key: str
+    ) -> None:
         """#ban / #unban / #deop 的共用实现。"""
         if not await self._require_admin(msg):
             return
@@ -323,7 +335,7 @@ class MinesVariantsV2(
             f"{response('command', done_key)}\n{target}: {level_name(old)}({old}) -> {level_name(level)}({level})",
         )
 
-    async def _dsmsg(self, msg, raw_message):
+    async def _dsmsg(self, msg: GroupMessage, raw_message: str) -> None:
         if not self.is_user(msg.user_id):
             await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
             return
@@ -345,7 +357,7 @@ class MinesVariantsV2(
             await self.api.post_group_msg(msg.group_id, response("deepseek", "dsmsg_failed").format(e))
 
     # ---------------- 综合指令 # ----------------
-    async def shape(self, msg, command=None):
+    async def shape(self, msg: Msg, command: list[str] | None = None) -> None:
         if command is None:
             command = _raw_text(msg).split()[1:]
         if len(command) == 0:

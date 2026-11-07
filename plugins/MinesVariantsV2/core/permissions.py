@@ -36,7 +36,7 @@ class PermissionsMixin:
         except (TypeError, ValueError):
             return MASTER_UID
 
-    def init_levels(self):
+    def init_levels(self) -> None:
         """首次加载时初始化 levels，并从旧版三列表迁移。"""
         if self.data.get("levels") is not None:
             # 确保 master 永远是 admin
@@ -53,7 +53,7 @@ class PermissionsMixin:
         levels[str(self.master_uid)] = ADMIN
         self.data["levels"] = levels
 
-    def level_of(self, user_id) -> int:
+    def level_of(self, user_id: int | str) -> int:
         """取某用户等级，未记录视为普通用户。"""
         levels = self.data.get("levels") or {}
         try:
@@ -61,7 +61,7 @@ class PermissionsMixin:
         except (TypeError, ValueError):
             return NORMAL
 
-    def set_level(self, user_id, level: int) -> int:
+    def set_level(self, user_id: int | str, level: int) -> int:
         """设置用户等级，返回旧等级。"""
         levels = self.data.get("levels")
         if levels is None:
@@ -73,15 +73,15 @@ class PermissionsMixin:
         self.data.save()
         return old
 
-    def is_banned(self, user_id) -> bool:
+    def is_banned(self, user_id: int | str) -> bool:
         return self.level_of(user_id) <= BAN
 
-    def is_user(self, user_id) -> bool:
+    def is_user(self, user_id: int | str) -> bool:
         return self.level_of(user_id) >= USER
 
-    def is_admin(self, user_id) -> bool:
+    def is_admin(self, user_id: int | str) -> bool:
         return self.level_of(user_id) >= ADMIN
 
-    def all_levels(self) -> dict:
+    def all_levels(self) -> dict[str, int]:
         """返回 {uid(str): level(int)} 的副本。"""
         return {k: int(v) for k, v in (self.data.get("levels") or {}).items()}

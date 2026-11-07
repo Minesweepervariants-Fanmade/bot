@@ -11,11 +11,12 @@ from concurrent.futures import ThreadPoolExecutor
 import psutil
 
 from .config import SELF_PATH, config_data, response, request_map, _log, cfg, project_path
+from .schema import Msg
 from .request import Request
 from .utils import run_command, get_system_stats, HOST_IP, wait_for_pid
 
 
-def _tail_log(log_file_name: str, size: int = None) -> str:
+def _tail_log(log_file_name: str, size: int | None = None) -> str:
     if size is None:
         size = cfg("query", "log_tail_bytes", default=16384)
     if not os.path.exists(log_file_name):
@@ -26,13 +27,13 @@ def _tail_log(log_file_name: str, size: int = None) -> str:
         return f.read().decode("utf-8", errors="ignore")
 
 
-def _fmt(path, rid, suffix):
+def _fmt(path: str, rid: int, suffix: str) -> str:
     return os.path.join(path, str(rid) + suffix)
 
 
 class TasksMixin:
     # ---------------- 生成 ----------------
-    def thread_target(self, msg, command, request: Request):
+    def thread_target(self, msg: Msg, command: list[str], request: Request) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -40,7 +41,7 @@ class TasksMixin:
         finally:
             loop.close()
 
-    async def spawn(self, msg, command, request: Request):
+    async def spawn(self, msg: Msg, command: list[str], request: Request) -> None:
         if len(command) < 2:
             await self.send_message(msg, response("prompts", "generate_usage"), reply=msg.message_id)
             request_map.pop(request.request_id, None)
@@ -175,7 +176,7 @@ class TasksMixin:
         request_map.pop(request.request_id, None)
 
     # ---------------- DeepSeek ----------------
-    def thread_deepseek(self, msg, command, request):
+    def thread_deepseek(self, msg: Msg, command: list[str], request: Request) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -183,7 +184,7 @@ class TasksMixin:
         finally:
             loop.close()
 
-    async def deepseek_summon(self, msg, command, request: Request):
+    async def deepseek_summon(self, msg: Msg, command: list[str], request: Request) -> None:
         rule_id = command[1]
         with open(os.path.join(SELF_PATH, "fanmade_doc", "rule", "ruleTodo.json"), "r", encoding="utf-8") as f:
             rule_todo = json.load(f)
@@ -236,7 +237,7 @@ class TasksMixin:
         request_map.pop(request.request_id, None)
 
     # ---------------- 查询 ----------------
-    async def query_thread(self, msg, command=None):
+    async def query_thread(self, msg: Msg, command: list[str] | None = None) -> None:
         if command is None:
             raw_message = "".join(i["data"]["text"] for i in msg.message if i["type"] == "text").strip()
             command = raw_message.split()
@@ -310,7 +311,7 @@ class TasksMixin:
             if resp and resp.get("status", "") != "ok":
                 await self.api.post_private_msg(msg.user_id, response("forward", "send_failed"))
 
-    def _query_thread(self, query_id):
+    def _query_thread(self, query_id: int) -> str:
         if request_map[query_id].task_type == "DEEPSEEK":
             return ""
         result = request_map[query_id].get_output()
@@ -330,7 +331,7 @@ class TasksMixin:
         return reply_text
 
     # ---------------- 终止 ----------------
-    async def kill_thread(self, command, msg):
+    async def kill_thread(self, command: list[str], msg: Msg) -> None:
         kill_list = []
         if "all" in command or "a" in command:
             command.extend([str(i) for i in request_map.keys()] + ["0"])
@@ -362,8 +363,8 @@ class TasksMixin:
             await self.api.post_private_msg(msg.user_id, text)
 
     # ---------------- 状态 ----------------
-    async def state(self, msg):
-        def _block(key, proc_info, interval):
+    async def state(self, msg: Msg) -> None:
+        def _block(key: int, proc_info: Request, interval: float) -> str:
             block = "\n" + response("status", "process_info", "1").format(key, proc_info.pid, proc_info.start_time)
             block += response("status", "process_info", "2").format(proc_info.data)
             block += response("status", "process_info", "3").format(proc_info.nickname)
@@ -384,7 +385,7 @@ class TasksMixin:
             block += self._query_thread(key)
             return block
 
-        async def _main():
+        async def _main() -> None:
             command = "".join(i["data"]["text"] for i in msg.message if i["type"] == "text").strip().split()
             interval = float(command[1]) if len(command) > 1 and command[1].replace(".", "").isdigit() else config_data["interval"]
             result = response("status", "total_processes").format(len(request_map))
@@ -415,10 +416,10 @@ class TasksMixin:
         threading.Thread(target=lambda: asyncio.run(_main()), daemon=True).start()
 
     # ---------------- 日志 ----------------
-    async def get_log(self, msg, log_id: str = None):
+    async def get_log(self, msg: Msg, log_id: str | None = None) -> None:
         from ncatbot.core.api import check_and_log
 
-        async def _reply(target, text):
+        async def _reply(target: int, text: str) -> None:
             if hasattr(msg, "group_id"):
                 await self.api.post_group_msg(target, text)
             else:
@@ -450,7 +451,7 @@ class TasksMixin:
         return check_and_log(await self.api._http.post("/send_private_msg", json=payload))
 
     # ---------------- 命令 ----------------
-    async def command(self, command, msg):
+    async def command(self, command: str, msg: Msg) -> None:
         reply_text = ""
         if msg.message[0]["type"] == "reply":
             reply_msg = await self.api.get_msg(msg.message[0]["data"]["id"])

@@ -2,9 +2,55 @@
 
 TypedDict 在运行时零开销，仅用于类型检查与 IDE 补全。
 """
-from typing import Literal, Protocol, TypedDict, Union
+from typing import Any, Literal, Protocol, TypedDict, Union
+
+from ncatbot.core.api import BotAPI
+from ncatbot.core.message import GroupMessage, PrivateMessage
 
 TaskType = Literal["MINES", "DEEPSEEK"]
+
+# 消息对象（群聊/私聊的统一别名）
+Msg = Union[GroupMessage, PrivateMessage]
+
+# ncatbot API 返回的原始 JSON
+class ApiResult(TypedDict, total=False):
+    status: str
+    retcode: int
+    message: str
+    data: dict
+    code: int
+    msg: str
+
+# ---------------------------------------------------------------------------
+# 消息节点
+# ---------------------------------------------------------------------------
+class TextData(TypedDict):
+    text: str
+
+
+class ImageData(TypedDict):
+    file: str
+
+
+class TextElem(TypedDict):
+    type: str
+    data: TextData
+
+
+class ImageElem(TypedDict):
+    type: str
+    data: ImageData
+
+
+class NodeData(TypedDict, total=False):
+    user_id: str
+    nickname: str
+    content: list
+
+
+class MsgNode(TypedDict):
+    type: str
+    data: NodeData
 
 
 # ---------------------------------------------------------------------------
@@ -117,14 +163,22 @@ class PluginData(TypedDict, total=False):
 class DataStore(Protocol):
     """UniversalLoader 的结构化子集，供类型检查使用。"""
 
-    def get(self, key: str, default=None): ...
+    def get(self, key: str, default: Any = None) -> Any: ...
 
-    def __getitem__(self, key: str): ...
+    def __getitem__(self, key: str) -> Any: ...
 
-    def __setitem__(self, key: str, value) -> None: ...
+    def __setitem__(self, key: str, value: Any) -> None: ...
 
-    def save(self, *args, **kwargs): ...
+    def save(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-# 消息类型别名（避免各处重复写 Union）
-MessageLike = Union["GroupMessage", "PrivateMessage"]  # type: ignore[name-defined]
+class HasApi(Protocol):
+    """需要 self.api 的 mixin 的结构约束。"""
+
+    api: BotAPI
+
+
+class HasData(Protocol):
+    """需要 self.data 的 mixin 的结构约束。"""
+
+    data: DataStore

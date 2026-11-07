@@ -4,13 +4,17 @@ import os
 import socket
 import subprocess
 import threading
-from typing import Literal
-
 from .config import response, config_data, _log, cfg
+from .schema import TaskType
 
 
 class Request:
-    def __init__(self, max_length=0, _request_id=0, task_type: Literal["MINES", "DEEPSEEK"] = "MINES"):
+    def __init__(
+        self,
+        max_length: int = 0,
+        _request_id: int = 0,
+        task_type: TaskType = "MINES",
+    ) -> None:
         self.mode = None
         self.output_buffer = []
         self.max_length = max_length
@@ -29,7 +33,7 @@ class Request:
         self.data = ""
         self.nickname = ""
 
-    def clone(self):
+    def clone(self) -> "Request":
         request = Request(self.max_length, self.request_id)
         request.start_time = self.start_time
         request.data = self.data
@@ -37,7 +41,7 @@ class Request:
         request.output_buffer = self.output_buffer
         return request
 
-    def run_task(self, args: str, host: str = "local", mode="LINE") -> None:
+    def run_task(self, args: str, host: str = "local", mode: str = "LINE") -> None:
         """启动新线程运行任务（异步执行）。"""
         self.mode = mode
         self._thread = threading.Thread(target=self._run_task, args=(args,), daemon=True)
@@ -51,7 +55,7 @@ class Request:
             except Exception as e:
                 _log.warning(f"发送输入失败: {e}")
 
-    def _run_task(self, args: str, host: str = None, port: int = None) -> None:
+    def _run_task(self, args: str, host: str | None = None, port: int | None = None) -> None:
         """实际执行任务的线程函数（按行接收）。"""
         host = host or cfg("socket", "host", default="localhost")
         port = port or cfg("socket", "port", default=31408)
@@ -174,7 +178,7 @@ class Request:
         self.output_buffer = []
         self._completed.set()
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.close_connection()
 
     def get_output(self) -> str:
@@ -209,5 +213,5 @@ class Request:
     def is_completed(self) -> bool:
         return self._completed.is_set()
 
-    def wait_completion(self, timeout=None) -> bool:
+    def wait_completion(self, timeout: float | None = None) -> bool:
         return self._completed.wait(timeout)

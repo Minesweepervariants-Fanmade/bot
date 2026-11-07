@@ -4,9 +4,12 @@ import json
 import os
 import random
 import time
+from typing import Awaitable, Callable
 
 import regex
 import requests
+
+from .schema import Msg
 
 from .config import SELF_PATH, config_data, response, _log, REG_LOCK, cfg, project_path
 
@@ -25,7 +28,7 @@ def _fetch_bytes(url: str) -> bytes:
     return resp.content
 
 
-def update_all_rules(timeout=None) -> bool:
+def update_all_rules(timeout: int | None = None) -> bool:
     """请求后端重新导出 rule.json 并清空缓存。"""
     if timeout is None:
         timeout = cfg("update_rules_timeout", default=20)
@@ -46,10 +49,10 @@ def update_all_rules(timeout=None) -> bool:
 
 
 class RulesMixin:
-    async def rule_list(self, msg):
+    async def rule_list(self, msg: Msg) -> None:
         await self.send_message(msg, response("rules", "rule_list"))
 
-    async def search_rule(self, msg, command=None):
+    async def search_rule(self, msg: Msg, command: list[str] | None = None) -> None:
         if command is None:
             raw_message = "".join(i["data"]["text"] for i in msg.message if i["type"] == "text").strip()
             command = raw_message.split()
@@ -182,7 +185,7 @@ class RulesMixin:
             if resp and resp.get("status", "") != "ok":
                 await self.api.post_private_msg(msg.user_id, response("forward", "search_failed"))
 
-    def all_rule(self):
+    def all_rule(self) -> list[list[dict]]:
         """返回分组规则缓存：[{name, doc, author}, ...] × 4 组。"""
         global ALL_RULE
         if ALL_RULE:
@@ -256,7 +259,9 @@ class RulesMixin:
         ALL_RULE = rules_list
         return ALL_RULE
 
-    async def push_todo_rule(self, callback, msg):
+    async def push_todo_rule(
+        self, callback: Callable[[], Awaitable[str]], msg: Msg
+    ) -> None:
         """同步远程 doc 分支 -> 回调修改 -> 提交并推送。"""
         repo_path = os.path.join(SELF_PATH, "fanmade_doc", "rule")
         async with REG_LOCK:
@@ -289,7 +294,7 @@ class RulesMixin:
                 self.data["last_remote_hash_doc"] = hash_out.strip()
                 await self.send_message(msg, response("git", "pushed"))
 
-    async def register_rules(self, msg, name, doc):
+    async def register_rules(self, msg: Msg, name: str, doc: str) -> None:
         reply = None
         _image_bytes = None
         if msg.message[0]["type"] == "reply":
@@ -342,7 +347,7 @@ class RulesMixin:
         image_name = get_rule_image(name) + ".png"
         image_path = os.path.join(image_dir, image_name)
 
-        async def callback():
+        async def callback() -> str:
             if doc and _image_bytes:
                 with open(image_path, "wb") as f:
                     f.write(_image_bytes)
@@ -369,7 +374,9 @@ class RulesMixin:
 
         await self.push_todo_rule(callback, msg)
 
-    async def todo_rule_rename(self, msg, command=None):
+    async def todo_rule_rename(
+        self, msg: Msg, command: list[str] | None = None
+    ) -> None:
         if command is None:
             raw_message = "".join(i["data"]["text"] for i in msg.message if i["type"] == "text").strip()
             command = raw_message.split()
@@ -399,7 +406,7 @@ class RulesMixin:
             await self.send_message(msg, response("rename", "same"))
             return
 
-        async def callback():
+        async def callback() -> str:
             for _rule in rule_todo:
                 if _rule["name"] == target_rule_id and _rule is not source_rule:
                     await self.send_message(msg, response("rename", "occupied").format(target_rule_id))
@@ -427,7 +434,7 @@ class RulesMixin:
         ALL_RULE.clear()
         self.all_rule()
 
-    async def chown(self, msg, command=None):
+    async def chown(self, msg: Msg, command: list[str] | None = None) -> None:
         if command is None:
             raw_message = "".join(i["data"]["text"] for i in msg.message if i["type"] == "text").strip()
             command = raw_message.split()
@@ -442,7 +449,7 @@ class RulesMixin:
             await self.send_message(msg, response("chown", "todo_missing"))
             return
 
-        async def callback():
+        async def callback() -> str:
             with open(todo_path, "r", encoding="utf-8") as f:
                 rule_todo = json.load(f)
             target = next((r for r in rule_todo if r["name"] == rule_id), None)
@@ -465,7 +472,7 @@ class RulesMixin:
         ALL_RULE.clear()
         self.all_rule()
 
-    async def pull(self, msg):
+    async def pull(self, msg: Msg) -> None:
         await self.send_message(msg, response("git", "start_pull"))
         result = []
         proj_path = project_path()
@@ -549,7 +556,7 @@ class RulesMixin:
         update_all_rules()
         await self._send_forward_text(result, msg)
 
-    async def _send_forward_text(self, result, msg):
+    async def _send_forward_text(self, result: list[str], msg: Msg) -> None:
         if hasattr(msg, "group_id"):
             resp = await self.send_group_forward_msg_text(result, msg)
             if resp and resp.get("status", "") != "ok":

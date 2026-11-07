@@ -3,10 +3,14 @@ import ast
 import asyncio
 import os
 import socket
+from typing import TYPE_CHECKING
 
 import psutil
 
 from .config import config_data, _log, cfg
+
+if TYPE_CHECKING:
+    from .request import Request
 
 
 DEFAULT_PROBE_TARGETS: list[str] = ["8.8.8.8", "114.114.114.114"]
@@ -51,7 +55,9 @@ def get_host_ip() -> str:
 HOST_IP = get_host_ip()
 
 
-async def run_command(command: str, cwd=None, input_str: str = None):
+async def run_command(
+    command: str, cwd: str | None = None, input_str: str | None = None
+) -> tuple[int, str, str]:
     """在指定目录执行 shell 命令。
 
     Returns:
@@ -84,7 +90,9 @@ async def run_command(command: str, cwd=None, input_str: str = None):
         return -1, "", str(e)
 
 
-async def wait_for_pid(request, timeout: float = 10.0, interval: float = 0.05) -> int:
+async def wait_for_pid(
+    request: "Request", timeout: float = 10.0, interval: float = 0.05
+) -> int:
     """异步等待 request 输出中出现 PID，返回 pid；超时或解析失败返回 -1。
 
     替代原先的 `while "PID" not in ...: time.sleep(0.1)` 忙等，
@@ -106,7 +114,7 @@ async def wait_for_pid(request, timeout: float = 10.0, interval: float = 0.05) -
         await asyncio.sleep(interval)
 
 
-def get_system_stats(interval=None) -> str:
+def get_system_stats(interval: float | None = None) -> str:
     """获取系统 CPU 和内存占用，返回格式化字符串。"""
     if interval is None:
         interval = config_data["interval"]
@@ -131,7 +139,7 @@ def get_rule_image(file_name: str) -> str:
     return file_name
 
 
-def parse_log_for_codes(log_path: str):
+def parse_log_for_codes(log_path: str) -> tuple[str, str, list, int, bool]:
     """从 hint 日志中解析 board_code / answer_code / rules / total / used_r。
 
     Returns:
@@ -162,7 +170,11 @@ def parse_log_for_codes(log_path: str):
     return board_code, answer_code, rules_list, total, used_r
 
 
-def split_by_content_length(items, max_len=None, chunk_max_length=None):
+def split_by_content_length(
+    items: list,
+    max_len: int | None = None,
+    chunk_max_length: int | None = None,
+) -> list[list]:
     if max_len is None:
         max_len = cfg("forward", "max_length", default=7000)
     if chunk_max_length is None:

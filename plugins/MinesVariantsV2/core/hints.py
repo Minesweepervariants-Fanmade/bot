@@ -4,17 +4,19 @@ import base64
 import os
 import threading
 from pathlib import Path
+from typing import Any, Callable, Coroutine
 
 import requests
 
 from .config import config_data, response, request_map, _log, cfg
+from .schema import Msg
 from .utils import wait_for_pid
 from .request import Request
 
 DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
-def _read_log_tail(log_path: str, size: int = None) -> str:
+def _read_log_tail(log_path: str, size: int | None = None) -> str:
     if size is None:
         size = cfg("hint", "log_tail_bytes", default=4096)
     if not os.path.exists(log_path):
@@ -24,7 +26,7 @@ def _read_log_tail(log_path: str, size: int = None) -> str:
         return f.read().decode("utf-8", errors="replace")
 
 
-def _collect_images(text: str) -> list:
+def _collect_images(text: str) -> list[str]:
     images = []
     for line in text.splitlines():
         line = line.strip()
@@ -48,7 +50,7 @@ def _download_image(url: str, dest: str) -> None:
                 f.write(chunk)
 
 
-def _images_to_base64(images: list) -> list:
+def _images_to_base64(images: list[str]) -> list[str]:
     out = []
     for path in images:
         with open(path, "rb") as f:
@@ -63,8 +65,8 @@ def _img_sort_key(p: str) -> int:
         return 0
 
 
-def _run_coro_in_thread(coro_factory):
-    def runner():
+def _run_coro_in_thread(coro_factory: Callable[[], Coroutine[Any, Any, None]]) -> None:
+    def runner() -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -76,7 +78,9 @@ def _run_coro_in_thread(coro_factory):
 
 
 class HintsMixin:
-    async def _send_fail_output(self, msg, result_lines, request_id):
+    async def _send_fail_output(
+        self, msg: Msg, result_lines: list[str], request_id: int
+    ) -> None:
         str_length = cfg("hint", "error_str_length", default=1000)
         msg_length = cfg("hint", "error_msg_length", default=9)
         err_result = [result_lines[i:i + str_length] for i in range(0, len(result_lines), str_length)][-msg_length:]
@@ -91,14 +95,14 @@ class HintsMixin:
             if resp and resp.get("status", "") != "ok":
                 await self.api.post_private_msg(msg.user_id, response("forward", "output_failed"))
 
-    async def _send_images(self, msg, base64_contents):
+    async def _send_images(self, msg: Msg, base64_contents: list[str]) -> None:
         _log.info(f"hint: 共{len(base64_contents)}份图片待发送")
         if hasattr(msg, "group_id"):
             await self.send_group_forward_msg_image(base64_contents, msg, summary=None)
         else:
             await self.send_private_forward_msg_image(base64_contents, msg, summary=None)
 
-    async def get_hint(self, msg, hint_id: str = None):
+    async def get_hint(self, msg: Msg, hint_id: str | None = None) -> None:
         raw_message = "".join(i["data"]["text"] for i in msg.message if i["type"] == "text").strip()
         command = raw_message.split()
         ocr_path = ""
@@ -129,7 +133,7 @@ class HintsMixin:
 
         log_path = os.path.join(config_data["log_path"], f"{request_id}.log")
 
-        async def _hint_by_board(board_code: str):
+        async def _hint_by_board(board_code: str) -> None:
             args = f"hint -b {board_code} -F {request_id} -m PUZZLE " + " ".join(command[1:])
             request = Request(max_length=cfg("mine_runner", "max_buffer", default=50), _request_id=request_id)
             request_map[request_id] = request
@@ -161,7 +165,7 @@ class HintsMixin:
             for p in images_path:
                 Path(p).unlink(missing_ok=True)
 
-        async def get_ocr():
+        async def get_ocr() -> None:
             request = Request(max_length=cfg("mine_runner", "max_buffer", default=50), _request_id=request_id)
             request_map[request_id] = request
             args = f"ocr -i {ocr_path} -f {request_id} " + " ".join(command[1:])
@@ -195,7 +199,7 @@ class HintsMixin:
 
         _run_coro_in_thread(get_ocr)
 
-    async def _get_hint_from_log(self, msg, hint_id: str = None):
+    async def _get_hint_from_log(self, msg: Msg, hint_id: str | None = None) -> None:
         if not hint_id:
             if hasattr(msg, "group_id"):
                 await self.api.post_group_msg(msg.group_id, response("prompts", "log_format_error"))
@@ -245,7 +249,7 @@ class HintsMixin:
             await self.send_message(msg, response("prompts", "log_unfind_error"))
             return
 
-        async def get_hint():
+        async def get_hint() -> None:
             self.data["id"] += 1
             self.data.save()
             request_id = self.data["id"]
