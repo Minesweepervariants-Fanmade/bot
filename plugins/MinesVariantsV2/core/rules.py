@@ -1,16 +1,26 @@
 """规则缓存、查询、注册与仓库同步（文案全部走 i18n）。"""
+import asyncio
 import json
 import os
 import random
 import time
 
 import regex
+import requests
 
 from .config import SELF_PATH, config_data, response, _log, REG_LOCK, cfg, project_path
 from .request import Request
 from .utils import run_command, split_by_content_length, get_rule_image
 
 ALL_RULE: list = []
+
+
+def _fetch_bytes(url: str) -> bytes:
+    """同步拉取图片字节（供 asyncio.to_thread 调用）。"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    return resp.content
 
 
 def update_all_rules(timeout=None) -> bool:
@@ -277,16 +287,16 @@ class RulesMixin:
                 await self.send_message(msg, response("git", "pushed"))
 
     async def register_rules(self, msg, name, doc):
-        import requests
-
         reply = None
-        _response = None
+        _image_bytes = None
         if msg.message[0]["type"] == "reply":
             reply = msg.message[0]["data"]["id"]
             reply_msgs = await self.api.get_msg(reply)
             for part in reply_msgs["data"]["message"]:
                 if part["type"] == "image":
-                    _response = requests.get(part["data"]["url"])
+                    _image_bytes = await asyncio.to_thread(
+                        _fetch_bytes, part["data"]["url"]
+                    )
                     break
 
         with open(f"{SELF_PATH}/fanmade_doc/rule/ruleTodo.json", "r", encoding="utf-8") as f:
@@ -330,9 +340,9 @@ class RulesMixin:
         image_path = os.path.join(image_dir, image_name)
 
         async def callback():
-            if doc and _response and _response.status_code == 200:
+            if doc and _image_bytes:
                 with open(image_path, "wb") as f:
-                    f.write(_response.content)
+                    f.write(_image_bytes)
                 rule_data["image"] = image_name
                 await run_command(f'git add "{image_path}"', cwd=repo_path)
 

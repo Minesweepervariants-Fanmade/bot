@@ -58,6 +58,28 @@ async def run_command(command: str, cwd=None, input_str: str = None):
         return -1, "", str(e)
 
 
+async def wait_for_pid(request, timeout: float = 10.0, interval: float = 0.05) -> int:
+    """异步等待 request 输出中出现 PID，返回 pid；超时或解析失败返回 -1。
+
+    替代原先的 `while "PID" not in ...: time.sleep(0.1)` 忙等，
+    既不阻塞事件循环，也不会无限等待。
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        joined = "".join(request.output_buffer)
+        if "PID" in joined:
+            try:
+                pid = int([i for i in request.output_buffer if "PID" in i][0]
+                          .split("PID:[")[1].split("]")[0])
+                request.pid = pid
+                return pid
+            except (IndexError, ValueError):
+                return -1
+        if asyncio.get_running_loop().time() >= deadline:
+            return -1
+        await asyncio.sleep(interval)
+
+
 def get_system_stats(interval=None) -> str:
     """获取系统 CPU 和内存占用，返回格式化字符串。"""
     if interval is None:

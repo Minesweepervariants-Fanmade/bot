@@ -3,12 +3,12 @@ import asyncio
 import base64
 import os
 import threading
-import time
 from pathlib import Path
 
 import requests
 
 from .config import config_data, response, request_map, _log, cfg
+from .utils import wait_for_pid
 from .request import Request
 
 
@@ -29,6 +29,21 @@ def _collect_images(text: str) -> list:
         if "Image saved to:" in line:
             images.append(line.split("Image saved to:", 1)[1].strip())
     return images
+
+
+def _download_image(url: str, dest: str) -> None:
+    """同步下载图片到本地（供 asyncio.to_thread 调用）。"""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    resp = requests.get(
+        url, headers=headers, stream=True,
+        timeout=cfg("hint", "download_timeout", default=30),
+    )
+    resp.raise_for_status()
+    chunk_size = cfg("hint", "download_chunk", default=8192)
+    with open(dest, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=chunk_size):
+            if chunk:
+                f.write(chunk)
 
 
 def _images_to_base64(images: list) -> list:
@@ -96,17 +111,10 @@ class HintsMixin:
                 request_id = self.data["id"]
                 img_url = part["data"]["url"]
                 ocr_path = os.path.join(config_data["out_path"], f"ocr{request_id}.png")
-                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
                 try:
-                    _response = requests.get(
-                        img_url, headers=headers, stream=True,
-                        timeout=cfg("hint", "download_timeout", default=30),
+                    await asyncio.to_thread(
+                        _download_image, img_url, ocr_path
                     )
-                    _response.raise_for_status()
-                    with open(ocr_path, "wb") as f:
-                        for chunk in _response.iter_content(chunk_size=cfg("hint", "download_chunk", default=8192)):
-                            if chunk:
-                                f.write(chunk)
                     _log.info(f"图片被保存至{ocr_path}")
                 except requests.exceptions.RequestException:
                     _log.warning(f"图片{img_url}下载失败")
@@ -125,12 +133,7 @@ class HintsMixin:
             request_map[request_id] = request
             request.data = response("hint", "state_calculating")
             request.run_task(args, mode="LINE")
-            while "PID" not in "".join(request.output_buffer):
-                time.sleep(0.1)
-            try:
-                request.pid = int([i for i in request.output_buffer if "PID" in i][0].split("PID:[")[1].split("]")[0])
-            except (IndexError, ValueError):
-                pass
+            await wait_for_pid(request)
             request.wait_completion()
 
             log_text = ""
@@ -162,12 +165,7 @@ class HintsMixin:
             args = f"ocr -i {ocr_path} -f {request_id} " + " ".join(command[1:])
             request.data = response("hint", "state_ocr")
             request.run_task(args, mode="LINE")
-            while "PID" not in "".join(request.output_buffer):
-                time.sleep(0.1)
-            try:
-                request.pid = int([i for i in request.output_buffer if "PID" in i][0].split("PID:[")[1].split("]")[0])
-            except (IndexError, ValueError):
-                pass
+            await wait_for_pid(request)
 
             await self.send_message(msg, response("hint", "start_calc").format(request_id))
             request.wait_completion()
@@ -260,12 +258,7 @@ class HintsMixin:
                 + more_arg
             )
             request.run_task(args, mode="LINE")
-            while "PID" not in "".join(request.output_buffer):
-                time.sleep(0.1)
-            try:
-                request.pid = int([i for i in request.output_buffer if "PID" in i][0].split("PID:[")[1].split("]")[0])
-            except (IndexError, ValueError):
-                pass
+            await wait_for_pid(request)
             request.data = response("hint", "board_label").format(hint_id)
             await self.send_message(msg, response("hint", "start_calc").format(request_id))
             request.wait_completion()

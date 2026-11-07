@@ -12,7 +12,7 @@ import psutil
 
 from .config import SELF_PATH, config_data, response, request_map, _log, cfg, project_path
 from .request import Request
-from .utils import run_command, get_system_stats, HOST_IP
+from .utils import run_command, get_system_stats, HOST_IP, wait_for_pid
 
 
 def _tail_log(log_file_name: str, size: int = None) -> str:
@@ -95,12 +95,7 @@ class TasksMixin:
         state = 1
 
         request.run_task(args)
-        while "PID" not in "".join(request.output_buffer):
-            time.sleep(0.1)
-        try:
-            request.pid = int([i for i in request.output_buffer if "PID" in i][0].split("PID:[")[1].split("]")[0])
-        except (IndexError, ValueError):
-            pass
+        await wait_for_pid(request)
         request.wait_completion()
         if request.request_id not in request_map:
             return
