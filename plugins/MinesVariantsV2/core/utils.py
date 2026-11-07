@@ -9,17 +9,43 @@ import psutil
 from .config import config_data, _log, cfg
 
 
+DEFAULT_PROBE_TARGETS: list[str] = ["8.8.8.8", "114.114.114.114"]
+
+
 def get_host_ip() -> str:
-    """查询本机对内网地址，失败时回退到 127.0.0.1。"""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    """探测本机对外网卡地址。
+
+    原理：UDP socket connect 一个外部地址（不会真正发包），
+    由操作系统选出默认出口网卡的本地 IP。
+
+    候选目标可由 data.yaml 的 host_ip_probe 指定；
+    全部失败时回退到主机名解析，最后回退 127.0.0.1。
+    """
+    targets = cfg("host_ip_probe", default=None) or DEFAULT_PROBE_TARGETS
+    if isinstance(targets, str):
+        targets = [targets]
+
+    for target in targets:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect((str(target), 80))
+            ip = s.getsockname()[0]
+            if ip and not ip.startswith("127."):
+                return ip
+        except OSError:
+            continue
+        finally:
+            s.close()
+
     try:
-        s.connect(("10.147.19.0", 80))
-        return s.getsockname()[0]
-    except OSError as e:
-        _log.warning(f"获取本机 IP 失败，回退 127.0.0.1: {e}")
-        return "127.0.0.1"
-    finally:
-        s.close()
+        ip = socket.gethostbyname(socket.gethostname())
+        if ip and not ip.startswith("127."):
+            return ip
+    except OSError:
+        pass
+
+    _log.warning(f"获取本机 IP 失败（尝试 {targets}），回退 127.0.0.1")
+    return "127.0.0.1"
 
 
 HOST_IP = get_host_ip()

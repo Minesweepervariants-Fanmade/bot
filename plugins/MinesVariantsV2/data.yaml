@@ -13,6 +13,9 @@ interval: 0.5            # CPU/内存采样间隔（秒）
 locale: zh_CN            # 界面语言，对应 i18n/<locale>.yaml
 master_uid: 3140864122   # 最高权限 UID，不可被降级
 thread_join_timeout: 1.0 # 关闭任务时等待线程退出的秒数
+host_ip_probe:           # 探测本机出口 IP 的候选目标（UDP connect，不实际发包）
+  - 8.8.8.8
+  - 114.114.114.114
 
 # ---------------- 任务连接 ----------------
 socket:
@@ -54,9 +57,22 @@ hint:
 # ---------------- 其它 ----------------
 regex_timeout: 0.2        # 规则正则匹配超时
 update_rules_timeout: 20  # #update 默认超时
+update_rules_retries: 6   # #update 失败重试次数
+
+http:
+  user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  timeout: 30             # 通用 HTTP 超时（秒）
 
 # ---------------- DeepSeek ----------------
 deepseek:
   log_path: 'D:\0.0\lib\my_python\dsBrowser'
   work_dir: 'D:\0.0\lib\ds-browser'
   prompt_dir: 'D:\0.0\lib\my_python\dsBrowser\prompt'
+  stop_bat: 'stop.bat'
+  save_rule_bat: 'save_rule.bat'
+  run_bat: 'run.bat'
+  main_log: 'logs\latest-main.log'
+  test_log: 'logs\latest-test.log'
+  prompt_files:
+    - main.txt
+    - test.txt

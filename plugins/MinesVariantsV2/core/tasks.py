@@ -200,11 +200,11 @@ class TasksMixin:
 
         log_dir = cfg("deepseek", "log_path", default=config_data.get("deepseek_log_path"))
         work_dir = cfg("deepseek", "work_dir", default=r"D:\0.0\lib\ds-browser")
-        test_log = os.path.join(log_dir, "logs\\latest-test.log")
+        test_log = os.path.join(log_dir, cfg("deepseek", "test_log", default=r"logs\latest-test.log"))
         open(test_log, "w", encoding="utf-8").close()
 
         process = await asyncio.create_subprocess_shell(
-            "save_rule.bat",
+            cfg("deepseek", "save_rule_bat", default="save_rule.bat"),
             cwd=work_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -217,7 +217,7 @@ class TasksMixin:
             return
 
         process = await asyncio.create_subprocess_shell(
-            "run.bat" + ("-u" if "-u" in command else ""),
+            cfg("deepseek", "run_bat", default="run.bat") + ("-u" if "-u" in command else ""),
             cwd=work_dir,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,

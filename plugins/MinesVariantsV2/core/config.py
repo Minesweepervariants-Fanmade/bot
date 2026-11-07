@@ -8,12 +8,16 @@
 """
 import asyncio
 from pathlib import Path
+from typing import Any, TypeVar, cast
 
 import yaml
 from ncatbot.utils import logger
 
 from ..i18n import set_locale as _set_locale
 from ..i18n import t as _t
+from .schema import ConfigData
+
+T = TypeVar("T")
 
 # 插件根目录（core/ 的上一级）
 SELF_PATH: str = Path(__file__).resolve().parent.parent.__str__()
@@ -34,6 +38,8 @@ DEFAULTS = {
     "locale": "zh_CN",
     "master_uid": 3140864122,
     "thread_join_timeout": 1.0,
+    # 探测本机出口 IP 的候选目标（UDP connect，不实际发包）
+    "host_ip_probe": ["8.8.8.8", "114.114.114.114"],
     # 任务连接
     "socket": {"host": "localhost", "port": 31408, "recv_size": 4096},
     # 生成任务
@@ -67,10 +73,22 @@ DEFAULTS = {
     # 其它
     "regex_timeout": 0.2,
     "update_rules_timeout": 20,
+    "update_rules_retries": 6,
+    # HTTP
+    "http": {
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "timeout": 30,
+    },
     "deepseek": {
         "log_path": r"D:\0.0\lib\my_python\dsBrowser",
         "work_dir": r"D:\0.0\lib\ds-browser",
         "prompt_dir": r"D:\0.0\lib\my_python\dsBrowser\prompt",
+        "stop_bat": "stop.bat",
+        "save_rule_bat": "save_rule.bat",
+        "run_bat": "run.bat",
+        "main_log": r"logs\latest-main.log",
+        "test_log": r"logs\latest-test.log",
+        "prompt_files": ["main.txt", "test.txt"],
     },
 }
 
@@ -101,7 +119,7 @@ def _load_config(path: str) -> dict:
     return _deep_merge(DEFAULTS, data)
 
 
-config_data: dict = _load_config(f"{SELF_PATH}/data.yaml")
+config_data: ConfigData = cast(ConfigData, _load_config(f"{SELF_PATH}/data.yaml"))
 
 # 兼容旧代码里的 config_data["deepseek_log_path"]
 config_data.setdefault("deepseek_log_path", config_data["deepseek"]["log_path"])
@@ -110,15 +128,20 @@ config_data.setdefault("deepseek_log_path", config_data["deepseek"]["log_path"])
 _set_locale(str(config_data.get("locale") or "zh_CN"))
 
 
-def cfg(*keys, default=None):
-    """按点路径读取配置；缺失返回 default。"""
-    node = config_data
+def cfg(*keys: str, default: T = None) -> T:
+    """按点路径读取配置；缺失返回 default。
+
+    泛型签名让调用处能保留 default 的类型，例如：
+        cfg("socket", "port", default=31408)   # -> int
+        cfg("deepseek", "work_dir", default="")  # -> str
+    """
+    node: Any = config_data
     for k in keys:
         if isinstance(node, dict) and k in node:
             node = node[k]
         else:
             return default
-    return node
+    return cast(T, node)
 
 
 def project_path() -> str:
@@ -142,4 +165,4 @@ CHUNK_MAX_LENGTH = cfg("forward", "chunk_max_length", default=100)
 REG_LOCK = asyncio.Lock()
 
 # 运行中的任务表：request_id -> Request
-request_map: dict = {}
+request_map: dict[int, "Request"] = {}  # noqa: F821 (Request 在 request.py 中定义)

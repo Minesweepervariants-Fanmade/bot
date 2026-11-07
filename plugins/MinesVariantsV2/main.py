@@ -202,7 +202,7 @@ class MinesVariantsV2(
         target = msg.group_id if is_group else msg.user_id
         poster = self.api.post_group_msg if is_group else self.api.post_private_msg
         await poster(target, response("categories", "update_start"))
-        timeout = int(command[1]) if len(command) > 1 and command[1].isdigit() else 20
+        timeout = int(command[1]) if len(command) > 1 and command[1].isdigit() else cfg("update_rules_timeout", default=20)
         ok = update_all_rules(timeout)
         await poster(target, response("categories", "update_end") if ok else response("categories", "update_fail"))
 
@@ -337,7 +337,7 @@ class MinesVariantsV2(
         try:
             prompt_dir = cfg("deepseek", "prompt_dir", default=r"D:\0.0\lib\my_python\dsBrowser\prompt")
             os.makedirs(prompt_dir, exist_ok=True)
-            for fname in ("main.txt", "test.txt"):
+            for fname in cfg("deepseek", "prompt_files", default=["main.txt", "test.txt"]):
                 with open(os.path.join(prompt_dir, fname), "a", encoding="utf-8") as f:
                     f.write(content + "\n")
             await self.api.post_group_msg(msg.group_id, response("deepseek", "dsmsg_done"))

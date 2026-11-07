@@ -147,7 +147,7 @@ class Request:
             except Exception as e:
                 _log.warning(f"强杀 DEEPSEEK 进程 {self.pid} 失败: {e}")
             subprocess.run(
-                "stop.bat",
+                cfg("deepseek", "stop_bat", default="stop.bat"),
                 cwd=cfg("deepseek", "work_dir", default=r"D:\0.0\lib\ds-browser"),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -181,8 +181,8 @@ class Request:
         """获取当前输出内容（线程安全）。"""
         if self.task_type == "DEEPSEEK":
             log_dir = cfg("deepseek", "log_path", default=config_data.get("deepseek_log_path"))
-            main_log = os.path.join(log_dir, "logs\\latest-main.log")
-            test_log = os.path.join(log_dir, "logs\\latest-test.log")
+            main_log = os.path.join(log_dir, cfg("deepseek", "main_log", default=r"logs\latest-main.log"))
+            test_log = os.path.join(log_dir, cfg("deepseek", "test_log", default=r"logs\latest-test.log"))
 
             main_exists = os.path.exists(main_log)
             test_exists = os.path.exists(test_log)

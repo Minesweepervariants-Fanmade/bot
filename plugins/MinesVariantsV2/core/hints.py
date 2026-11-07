@@ -11,6 +11,8 @@ from .config import config_data, response, request_map, _log, cfg
 from .utils import wait_for_pid
 from .request import Request
 
+DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
 
 def _read_log_tail(log_path: str, size: int = None) -> str:
     if size is None:
@@ -33,7 +35,7 @@ def _collect_images(text: str) -> list:
 
 def _download_image(url: str, dest: str) -> None:
     """同步下载图片到本地（供 asyncio.to_thread 调用）。"""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": cfg("http", "user_agent", default=DEFAULT_UA)}
     resp = requests.get(
         url, headers=headers, stream=True,
         timeout=cfg("hint", "download_timeout", default=30),

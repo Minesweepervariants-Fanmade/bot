@@ -9,6 +9,8 @@ import regex
 import requests
 
 from .config import SELF_PATH, config_data, response, _log, REG_LOCK, cfg, project_path
+
+DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 from .request import Request
 from .utils import run_command, split_by_content_length, get_rule_image
 
@@ -17,19 +19,20 @@ ALL_RULE: list = []
 
 def _fetch_bytes(url: str) -> bytes:
     """同步拉取图片字节（供 asyncio.to_thread 调用）。"""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    resp = requests.get(url, headers=headers, timeout=30)
+    headers = {"User-Agent": cfg("http", "user_agent", default=DEFAULT_UA)}
+    resp = requests.get(url, headers=headers, timeout=cfg("http", "timeout", default=30))
     resp.raise_for_status()
     return resp.content
 
 
 def update_all_rules(timeout=None) -> bool:
+    """请求后端重新导出 rule.json 并清空缓存。"""
     if timeout is None:
         timeout = cfg("update_rules_timeout", default=20)
-    """请求后端重新导出 rule.json 并清空缓存。"""
     global ALL_RULE
+    retries = cfg("update_rules_retries", default=6)
     _log.info("发起更新规则列表")
-    for _ in range(6):
+    for _ in range(retries):
         try:
             request = Request()
             request.run_task(f"list --json -F {SELF_PATH}/rule.json", mode="BIN")
