@@ -324,11 +324,9 @@ class MinesVariantsV2(
             await self.send_message(msg, response("command", "target_is_ban"))
             return
         if level == NORMAL and old == NORMAL:
-            await self.send_message(msg, response("command", "target_is_unban"))
+            key = "target_is_unban" if done_key == "unban_done" else "target_not_admin"
+            await self.send_message(msg, response("command", key))
             return
-        if old >= USER and level < old and level <= NORMAL:
-            # 仅允许降级到自己能管的范围之外不再额外限制
-            pass
         self.set_level(target, level)
         await self.send_message(
             msg,

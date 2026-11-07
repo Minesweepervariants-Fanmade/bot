@@ -31,6 +31,19 @@ def _fmt(path: str, rid: int, suffix: str) -> str:
     return os.path.join(path, str(rid) + suffix)
 
 
+def _parse_interval(command: list[str], default: float) -> float:
+    """解析 `#state <秒>` 的可选采样间隔，非法输入回退 default。"""
+    if len(command) <= 1:
+        return default
+    try:
+        value = float(command[1])
+    except (TypeError, ValueError):
+        return default
+    if value <= 0:
+        return default
+    return value
+
+
 class TasksMixin:
     # ---------------- 生成 ----------------
     def thread_target(self, msg: Msg, command: list[str], request: Request) -> None:
@@ -387,7 +400,7 @@ class TasksMixin:
 
         async def _main() -> None:
             command = "".join(i["data"]["text"] for i in msg.message if i["type"] == "text").strip().split()
-            interval = float(command[1]) if len(command) > 1 and command[1].replace(".", "").isdigit() else config_data["interval"]
+            interval = _parse_interval(command, config_data["interval"])
             result = response("status", "total_processes").format(len(request_map))
             keys = list(request_map.keys())
 
