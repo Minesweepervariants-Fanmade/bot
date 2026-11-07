@@ -602,7 +602,10 @@ class MinesVariants(BasePlugin):
                 case "#帮助" | "#help" | "#?":
                     try:
                         HELP_TEXT = yaml.full_load(open(f"{SELF_PATH}/help.yaml", "r", encoding="utf-8"))
-                        await self.send_group_forward_msg_text(HELP_TEXT, msg)
+                        result = await self.send_group_forward_msg_text(HELP_TEXT, msg)
+                        if result.get("status", "") != "ok":
+                            await self.api.post_group_msg(msg.group_id, "帮助发送失败")
+                        check_and_log(result)
                     except Exception as e:
                         _log.error(f"Failed to load help file: {e}")
                         if command[0] == "#帮助":
@@ -782,6 +785,41 @@ class MinesVariants(BasePlugin):
                         return
                     self.data["ban"].remove(target)
                     await self.api.post_group_msg(msg.group_id, response("command", "unban_done"))
+                    return
+                case "#dsmsg":
+                    # 把 #dsmsg 后面的全部内容（保留原始换行）追加到 dsBrowser 的 prompt 文件
+                    if (
+                        msg.user_id not in self.data["user"] and
+                        msg.user_id not in self.data["admin"]
+                    ):
+                        await self.api.post_group_msg(msg.group_id, response("command", "user_not_admin"))
+                        return
+                    running = {
+                        rid: req for rid, req in request_map.items()
+                        if req.task_type == "DEEPSEEK"
+                    }
+                    if not running:
+                        await self.api.post_group_msg(
+                            msg.group_id,
+                            "当前没有运行中的ds任务"
+                        )
+                        return
+                    content = raw_message[len("#dsmsg"):].lstrip()
+                    if not content:
+                        await self.api.post_group_msg(msg.group_id, "用法: #dsmsg <要追加的内容>")
+                        return
+                    try:
+                        prompt_dir = r"D:\0.0\lib\my_python\dsBrowser\prompt"
+                        os.makedirs(prompt_dir, exist_ok=True)
+                        for fname in ("main.txt", "test.txt"):
+                            with open(os.path.join(prompt_dir, fname), "a", encoding="utf-8") as f:
+                                f.write(content + "\n")
+                        await self.api.post_group_msg(
+                            msg.group_id,
+                            "已留言至运行中的deepseek"
+                        )
+                    except Exception as e:
+                        await self.api.post_group_msg(msg.group_id, f"追加失败: {e}")
                     return
                 case "#ds":
                     if (
@@ -1145,22 +1183,28 @@ class MinesVariants(BasePlugin):
                         response_text,
                         reply=msg.message_id
                     )
-                    await self.send_group_forward_msg_text(
+                    result = await self.send_group_forward_msg_text(
                         text=err_result,
                         source=response("categories", "terminal_output"),
                         msg=msg
                     )
+                    if result.get("status", "") != "ok":
+                        await self.api.post_group_msg(msg.group_id, "终端最终输出发送失败")
+                    check_and_log(result)
                 elif isinstance(msg, PrivateMessage):
                     await self.api.post_private_msg(
                         msg.user_id,
                         response_text,
                         reply=msg.message_id
                     )
-                    await self.send_private_forward_msg_text(
+                    result = await self.send_private_forward_msg_text(
                         text=err_result,
                         source=response("categories", "terminal_output"),
                         msg=msg
                     )
+                    if result.get("status", "") != "ok":
+                        await self.api.post_group_msg(msg.user_id, "终端最终输出发送失败")
+                    check_and_log(result)
                 return
             with open(log_path, "r", encoding="utf-8") as f:
                 while "|[BOARD]: " not in (line := f.readline()) and line: ...
@@ -1219,22 +1263,28 @@ class MinesVariants(BasePlugin):
                 err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][
                              ::-1]
                 if isinstance(msg, GroupMessage):
-                    await self.send_group_forward_msg_text(
+                    result = await self.send_group_forward_msg_text(
                         text=err_result,
                         source=response("categories", "terminal_output"),
                         msg=msg
                     )
+                    if result.get("status", "") != "ok":
+                        await self.api.post_group_msg(msg.group_id, "终端最终输出发送失败")
+                    check_and_log(result)
                 elif isinstance(msg, PrivateMessage):
                     await self.api.post_private_msg(
                         msg.user_id,
                         response("task", "failed").format(request.request_id),
                         reply=msg.message_id
                     )
-                    await self.send_private_forward_msg_text(
+                    result = await self.send_private_forward_msg_text(
                         text=err_result,
                         source=response("categories", "terminal_output"),
                         msg=msg
                     )
+                    if result.get("status", "") != "ok":
+                        await self.api.post_group_msg(msg.user_id, "终端最终输出发送失败")
+                    check_and_log(result)
 
                 request.close_connection()
                 return
@@ -1373,22 +1423,28 @@ class MinesVariants(BasePlugin):
                 err_result = [result[i:i + str_length] for i in range(0, len(result), str_length)][::-1][:msg_length][
                              ::-1]
                 if isinstance(msg, GroupMessage):
-                    await self.send_group_forward_msg_text(
+                    result = await self.send_group_forward_msg_text(
                         text=err_result,
                         source=response("categories", "terminal_output"),
                         msg=msg
                     )
+                    if result.get("status", "") != "ok":
+                        await self.api.post_group_msg(msg.group_id, "终端最终输出发送失败")
+                    check_and_log(result)
                 elif isinstance(msg, PrivateMessage):
                     await self.api.post_private_msg(
                         msg.user_id,
                         response("task", "failed").format(request.request_id),
                         reply=msg.message_id
                     )
-                    await self.send_private_forward_msg_text(
+                    result = await self.send_private_forward_msg_text(
                         text=err_result,
                         source=response("categories", "terminal_output"),
                         msg=msg
                     )
+                    if result.get("status", "") != "ok":
+                        await self.api.post_group_msg(msg.user_id, "终端最终输出发送失败")
+                    check_and_log(result)
 
                 request.close_connection()
                 return
@@ -1587,7 +1643,10 @@ class MinesVariants(BasePlugin):
         branch = branch.strip()
         if not branch:
             result.append("错误：无法获取当前分支名")
-            await self.send_group_forward_msg_text(result, msg)
+            result = await self.send_group_forward_msg_text(result, msg)
+            if result.get("status", "") != "ok":
+                await self.api.post_group_msg(msg.group_id, "终端最终输出发送失败")
+            check_and_log(result)
             return
 
         # ========== 2. 主仓库强制更新并记录日志 ==========
@@ -1676,7 +1735,10 @@ class MinesVariants(BasePlugin):
             result.append("  无子模块提交变更")
 
         update_all_rules()
-        await self.send_group_forward_msg_text(result, msg)
+        result = await self.send_group_forward_msg_text(result, msg)
+        if result.get("status", "") != "ok":
+            await self.api.post_group_msg(msg.group_id, "终端最终输出发送失败")
+        check_and_log(result)
 
     async def command(self, command, msg):
         reply_text = ""
@@ -1703,7 +1765,7 @@ class MinesVariants(BasePlugin):
                 "stderr: \n\n" + stderr[max(0, len(stderr) - 5000):]
             ]
 
-            await self.send_group_forward_msg_text(stdout, msg)
+            result = await self.send_group_forward_msg_text(stdout, msg)
 
     async def search_rule(self, msg: GroupMessage | PrivateMessage, command=None):
         if command is None:
@@ -1884,9 +1946,15 @@ class MinesVariants(BasePlugin):
         result = [response("rules", "found_rules").format(result_length, args)] + result
 
         if msg.message_type == "group":
-            await self.send_group_forward_msg_text(result, msg)
+            result = await self.send_group_forward_msg_text(result, msg)
+            if result.get("status", "") != "ok":
+                await self.api.post_group_msg(msg.group_id, "搜索结果发送失败, 请尝试使用/p参数")
+            check_and_log(result)
         elif msg.message_type == "private":
-            await self.send_private_forward_msg_text(result, msg)
+            result = await self.send_private_forward_msg_text(result, msg)
+            if result.get("status", "") != "ok":
+                await self.api.post_group_msg(msg.user_id, "搜索结果发送失败, 请尝试使用/p参数")
+            check_and_log(result)
 
     async def rule_list(self, msg):
         await self.send_message(msg, response("rules", "rule_list"))
@@ -2004,8 +2072,9 @@ class MinesVariants(BasePlugin):
             params["summary"] = summary
 
         result = await self.api._http.post("/send_group_forward_msg", json=params)
-        if result.get("status", "") != "ok":
-            await self.api.post_group_msg(msg.group_id, str(result))
+        # if result.get("status", "") != "ok":
+        #     await self.api.post_group_msg(msg.group_id, str(result))
+        return result
         return check_and_log(result)
 
     async def send_group_forward_msg_image(self, path: list | str, msg: GroupMessage, summary: Optional[str]):
@@ -2151,9 +2220,15 @@ class MinesVariants(BasePlugin):
 
             if len(request_map.keys()) > 3:
                 if hasattr(msg, "group_id"):
-                    await self.send_group_forward_msg_text(result, msg)
+                    result = await self.send_group_forward_msg_text(result, msg)
+                    if result.get("status", "") != "ok":
+                        await self.api.post_group_msg(msg.group_id, "合并消息发送失败")
+                    check_and_log(result)
                 else:
-                    await self.send_private_forward_msg_text(result, msg)
+                    result = await self.send_private_forward_msg_text(result, msg)
+                    if result.get("status", "") != "ok":
+                        await self.api.post_group_msg(msg.user_id, "合并消息发送失败")
+                    check_and_log(result)
             else:
                 if hasattr(msg, "group_id"):
                     await self.api.post_group_msg(msg.group_id, result)
@@ -2279,9 +2354,15 @@ class MinesVariants(BasePlugin):
         reply_text = log_text + "\n" + "\n".join([line for line in result.split("\n")][::-1][:10][::-1])
         result = [reply_text[i:i + str_length] for i in range(0, len(reply_text), str_length)][::-1][:msg_length][::-1]
         if type(msg) is GroupMessage:
-            await self.send_group_forward_msg_text(result, msg=msg)
+            result = await self.send_group_forward_msg_text(result, msg=msg)
+            if result.get("status", "") != "ok":
+                await self.api.post_group_msg(msg.group_id, "终端输出发送失败")
+            check_and_log(result)
         elif type(msg) is PrivateMessage:
-            await self.send_private_forward_msg_text(result, msg=msg)
+            result = await self.send_private_forward_msg_text(result, msg=msg)
+            if result.get("status", "") != "ok":
+                await self.api.post_group_msg(msg.user_id, "终端输出发送失败")
+            check_and_log(result)
         return
 
     def _query_thread(self, query_id):
@@ -2540,22 +2621,28 @@ class MinesVariants(BasePlugin):
                     response_text,
                     reply=msg.message_id
                 )
-                await self.send_group_forward_msg_text(
+                result = await self.send_group_forward_msg_text(
                     text=err_result,
                     source=response("categories", "terminal_output"),
                     msg=msg
                 )
+                if result.get("status", "") != "ok":
+                    await self.api.post_group_msg(msg.group_id, "终端最终输出发送失败")
+                check_and_log(result) 
             elif isinstance(msg, PrivateMessage):
                 await self.api.post_private_msg(
                     msg.user_id,
                     response("task", "failed").format(request.request_id),
                     reply=msg.message_id
                 )
-                await self.send_private_forward_msg_text(
+                result = await self.send_private_forward_msg_text(
                     text=err_result,
                     source=response("categories", "terminal_output"),
                     msg=msg
                 )
+                if result.get("status", "") != "ok":
+                    await self.api.post_group_msg(msg.user_id, "终端最终输出发送失败")
+                check_and_log(result)
         if state == 2:
             rule_name = result.split("未找到规则[")[-1].split("]", 1)[0]
             await self.send_message(
@@ -2589,6 +2676,9 @@ class MinesVariants(BasePlugin):
             time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(rule_data["time"]))
         )
 
+        log_dir = config_data.get("deepseek_log_path", "D:\\0.0\\lib\\my_python\\dsBrowser")
+        test_log = os.path.join(log_dir, "logs\\latest-test.log")
+        open(test_log, "w", encoding="utf-8").close()
         process = await asyncio.create_subprocess_shell(
             "save_rule.bat",
             cwd="D:\\0.0\\lib\\ds-browser",
