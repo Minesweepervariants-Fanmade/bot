@@ -249,27 +249,47 @@ class MinesVariantsV2(
             return False
         return True
 
+    @staticmethod
+    def _at_target(msg: Msg) -> int | None:
+        """若消息第 1 段是 at，返回其 QQ 号，否则 None。"""
+        if len(msg.message) > 1 and msg.message[1].get("type") == "at":
+            qq = msg.message[1].get("data", {}).get("qq")
+            if qq is not None and str(qq).isdigit():
+                return int(qq)
+        return None
+
     def _parse_target(self, msg: Msg, command: list[str]) -> int | None:
-        """解析被操作用户：优先数字参数，其次 at 段。返回 None 表示格式错误。"""
+        """解析被操作用户。
+
+        优先 @ 段：`#op @xxx 1` 中 command 只剩 ['#op', '1']，
+        不能把等级当成 QQ，必须先看 at。
+        """
+        at_target = self._at_target(msg)
+        if at_target is not None:
+            return at_target
         if len(command) > 1 and command[1].isdigit():
             return int(command[1])
-        if len(msg.message) > 1 and msg.message[1].get("type") == "at":
-            return int(msg.message[1]["data"]["qq"])
         return None
 
     def _parse_level(self, msg: Msg, command: list[str]) -> int:
-        """解析等级参数（默认 2=admin）。数字参数在 command[2]，at 场景在 message[2]。"""
-        raw = None
-        if len(command) > 1 and command[1].isdigit() and len(command) > 2:
-            raw = command[2]
-        elif len(msg.message) > 2 and msg.message[2].get("type") == "text":
-            raw = msg.message[2]["data"]["text"]
+        """解析等级参数，默认 ADMIN。
+
+        @ 场景：等级在第 2 段文本（message[2]）。
+        数字场景：等级在 command[2]。
+        """
+        raw: str | None = None
+        if self._at_target(msg) is not None:
+            if len(msg.message) > 2 and msg.message[2].get("type") == "text":
+                raw = msg.message[2]["data"].get("text")
+        else:
+            if len(command) > 2:
+                raw = command[2]
+
         if raw is None:
             return ADMIN
         raw = str(raw).strip()
         if raw in ("-1", "0", "1", "2"):
             return int(raw)
-        # 兼容旧写法：名字
         return {"ban": BAN, "normal": NORMAL, "user": USER, "admin": ADMIN}.get(raw.lower(), ADMIN)
 
     async def _op(self, msg: GroupMessage, command: list[str]) -> None:

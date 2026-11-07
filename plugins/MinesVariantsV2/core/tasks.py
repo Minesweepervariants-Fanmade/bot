@@ -340,7 +340,10 @@ class TasksMixin:
             if not line.strip():
                 continue
             if "进度" in line:
-                return reply_text + "\n用时:" + line.split("用时:")[1]
+                parts = line.split("用时:", 1)
+                if len(parts) < 2:
+                    return reply_text + "\n" + line
+                return reply_text + "\n用时:" + parts[1]
         return reply_text
 
     # ---------------- 终止 ----------------
