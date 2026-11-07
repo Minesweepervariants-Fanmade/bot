@@ -1,0 +1,1 @@
+"D:\0.0\lib\my_python\napcatbot\.venv\Scripts\python.exe" D:\0.0\lib\my_python\napcatbot\main.py -m

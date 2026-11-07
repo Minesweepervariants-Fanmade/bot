@@ -1,0 +1,271 @@
+# zh_CN.yaml - bot 发送消息 i18n 文案（唯一来源）
+# 取值规则：点路径；值为列表时随机取一条；调用方用 .format() 填充占位符。
+
+task:
+  created:
+    - "好哒~任务已经创建好了呢！可以用\"#查询 {}\"来查看进度哦~ (´▽`ʃ♡ƪ)"
+    - "任务创建成功啦！使用\"#查询 {}\"就可以随时查看进度了呢~ ୧(﹒︠ᴗ﹒︡)୨"
+  not_found:
+    - "那个...好像没有找到这个进程id呢，要不要再确认一下呀？(´•ω•̥`)"
+    - "不好意思呢，这个进程id好像不存在哦~ (。•́︿•̀。)"
+  unid:
+    - "请问想要查询哪个进程呢？告诉我进程id就好啦~ (^・ω・^ )"
+    - "需要查询进程的话，请告诉我具体的进程id哦~ 我会好好帮忙的！(ノ´▽`ノ)"
+  terminated:
+    - "已经帮你终止{}进程啦~ 如果有其他需要请随时告诉我哦！(´｡• ᵕ •｡`)"
+    - "进程{}已经成功终止了呢~ 还有什么可以帮你的吗？(๑¯◡¯๑)"
+  completed:
+    - "生成完成啦！请慢慢查看哦~ 希望你会喜欢呢！(⁄ ⁄•⁄ω⁄•⁄ ⁄)"
+    - "顺利完成生成了呢！快来查看结果吧~ (*´▽`*)"
+  failed:
+    - "呜...进程[{}]好像失败了呢...不过没关系，我们可以再试试别的办法！(｡•́︿•̀｡)"
+    - "抱歉呢，进程[{}]没有成功...要不要再试一次呀？我会继续努力的！(๑•́ ₃ •̀๑)"
+  hint_failed:
+    - "提示失败 终端最后的输出内容如下"
+  empty_output:
+    - "终端输出为空"
+  log_not_ready:
+    - "[日志文件尚未生成]"
+
+errors:
+  invalid_input:
+    - "输入的进程id好像不太对呢...可以再检查一下吗？(´･ω･`?)"
+    - "这个进程id格式不太对呢，请重新输入一个正确的id好吗？(。•ω•。)ノ"
+  unknown_rule:
+    - "[{}]这个规则人家不太熟悉呢...能不能换一个规则试试呀？(๑•﹏•)"
+    - "抱歉呢，暂时不支持[{}]这个规则哦...我们可以试试其他规则呢~(´▽`ʃ♡ƪ)"
+  connection_error:
+    - "连接出现了一点问题：{}...稍等一下再试试好吗？(。´ﾟωﾟ｀)。"
+    - "不好意思呢，连接遇到了问题：{}...我们待会儿再试一次吧~ (｡•́︿•̀｡)"
+  task_exception:
+    - "任务执行遇到了一点意外：{}...不过没关系，我们可以一起解决呢！(๑•̀ㅂ•́)و✧"
+    - "出了点小状况：{}...但请不要担心，我会继续努力的！(ノ﹏ヽ)"
+  cmd_exception:
+    - "处理命令时发生错误: {}。"
+
+prompts:
+  generate_usage:
+    - "使用方式是这样子的：\"#生成 5 V\"哦~ 需要我帮忙生成什么呢？(´｡• ᵕ •｡`)"
+    - "可以这样输入命令：\"#生成 5 V\"呢~ 告诉我具体需求就好啦！(◍•ᴗ•◍)✧"
+  size_position:
+    - "尺寸要放在最前面哦~ 像\"#生成 5 V\"这样就可以啦！(^・ω・^ )"
+    - "记得先把尺寸参数放在前面呢~ 这样我就能更好地理解你的需求啦！(ノ´▽`ノ)"
+  rule_query:
+    - "想要查询什么规则呢？告诉我关键词就好啦~ 我会认真帮你查找的！(๑¯◡¯๑)"
+    - "请告诉我想要查询的规则名称或描述哦~ 我会尽力帮你找到的！(⁄ ⁄•⁄ω⁄•⁄ ⁄)"
+  rule_not_found:
+    - "抱歉呢，没有找到匹配的规则...要不要换一个关键词再试试呀？(´•ω•̥`)"
+    - "好像没有找到相关的规则呢...我们再试试别的关键词好吗？(。•́︿•̀。)"
+  log_id_format_error:
+    - "跟随的进程ID非数字 示例[#log 1234]"
+  log_format_error:
+    - "获取日志的格式参数错误 后方需要跟随进程ID 示例[#log 1234]"
+  log_unfind_error:
+    - "未找到该日志文件"
+  hint_id_format_error:
+    - "跟随的进程ID非数字 示例[#hint 1234]"
+  hint_format_error:
+    - "获取日志的格式参数错误 后方需要跟随进程ID 示例[#hint 1234]"
+  hint_unfind_error:
+    - "未找到该历史信息文件"
+
+command:
+  user_not_admin:
+    - "抱歉呢，这个指令需要管理员权限才能使用哦~ (´･ω･`?)"
+    - "不好意思呀，目前这个指令还不能使用呢... (｡•́︿•̀｡)"
+  target_not_admin:
+    - "目标用户非管理员"
+  target_is_master:
+    - "你不能撤销你爹的权限(再叫禁言:D)"
+    - "你撤销你爹的权限干什么(再叫直接斩杀:D)"
+    - "我操你妈"
+  target_is_admin:
+    - "目标用户已经是管理员"
+  cmd_fmt:
+    - "格式错误 预期: #op @xxx/UID [等级] 或 #ban/#unban/#deop @xxx/UID\n等级: -1=ban 0=普通 1=user 2=admin（默认2）"
+  target_is_unban:
+    - "目标用户未被ban"
+  target_is_ban:
+    - "目标用户已经被ban"
+  unban_done:
+    - "重新接收目标用户消息"
+  ban_done:
+    - "成功停止接收目标用户任何消息"
+  ban_over_level:
+    - "目标用户拥有管理员/操作员权限, 不支持ban"
+  unknown_level:
+    - "未知的权限等级，可用: -1=ban 0=普通 1=user 2=admin"
+  op_done:
+    - "已经设置目标用户为管理员"
+  deop_done:
+    - "已经取消目标用户的所有权限"
+  user_done:
+    - "已经设置目标用户为操作员"
+  running_error:
+    - "执行时出了一点小问题呢...不过没关系，我们可以再试试别的办法！(๑•́ ₃ •̀๑)"
+    - "遇到了一点小困难...但请放心，我会继续努力的！(ノ﹏ヽ)"
+
+status:
+  total_processes:
+    - "现在总共有{}个进程在运行中呢~ ୧(﹒︠ᴗ﹒︡)୨"
+    - "目前有{}个进程正在运行哦！有什么需要我帮忙的吗？(◍•ᴗ•◍)✧"
+  process_info:
+    "1":
+      - "\n进程[{}] PID:[{}]\n开始时间:{}"
+      - "\n进程[{}] PID:[{}]\n起始时间:{}"
+    "2":
+      - "\n状态:{}"
+      - "\n状态:{}"
+    "3":
+      - "\n是{}在操作呢~"
+      - "\n是{}在操作呢~"
+    "4":
+      - "CPU:{}% | MEM:{}"
+    "5":
+      - "123"
+
+progress:
+  generating:
+    - "正在努力生成中呢，请稍等一下下哦~ (´▽`ʃ♡ƪ)"
+    - "马上就好啦~ 再耐心等待一小会儿呢！(⁄ ⁄•⁄ω⁄•⁄ ⁄)"
+  saving_image:
+    - "生成完成啦！现在正在保存图片哦~ (*´▽`*)"
+    - "图片保存中呢~ 很快就可以查看啦！(๑¯◡¯๑)"
+  retrying:
+    - "遇到了一点小问题，正在第{}次重新尝试呢~ 请稍等哦！(๑•̀ㅂ•́)و✧"
+    - "稍等一下下哦，我正在第{}次努力重新尝试呢~ (ノ´▽`ノ)"
+
+rules:
+  category_rules:
+    - "{}包含这些规则呢：\n[{}]"
+    - "这些都是{}的规则哦：\n[{}]"
+  found_rules:
+    - "找到了{}条包含\"{}\"的规则呢~ 希望对你有所帮助！(◍•ᴗ•◍)✧"
+    - "为你找到了{}条包含\"{}\"的规则哦！(*´▽`*)"
+  register_fmt_error:
+    - "注册格式错误 #注册规则 <规则名称> [规则描述]"
+  rule_list:
+    - "规则列表: https://minesweepervariants-fanmade.github.io/rule/或使用查询规则[#/p0, #/p1, ...]进行浏览"
+  empty_doc:
+    - "空规则描述"
+
+deepseek:
+  cmd_error:
+    - "格式错误 #ds 规则ID"
+  task_usage:
+    - "有其他进程正在占用deepseek"
+    - "有其他deepseek正在屙"
+  impl_rule:
+    - "deepseek正在实现[{}]"
+  impl_done:
+    - "deepseek屙完了 准备拉到bot"
+    - "deepseek完成规则实现 准备拉取远程库"
+  impl_fail:
+    - "deepseek没屙出来 fwds"
+    - "deepseek实现规则失败 请重试"
+  dsmsg_no_task:
+    - "当前没有运行中的ds任务"
+  dsmsg_usage:
+    - "用法: #dsmsg <要追加的内容>"
+  dsmsg_done:
+    - "已留言至运行中的deepseek"
+  dsmsg_failed:
+    - "追加失败: {}"
+
+images:
+  answer:
+    - "[正确答案在这里哦~]"
+    - "[正确答案在这里呢]"
+
+categories:
+  terminal_output:
+    - "最后输出在这里啦~"
+    - "输出结果在这里哦"
+  left_rules: "左线规则"
+  middle_rules: "中线规则"
+  right_rules: "右线规则"
+  rules_list: "规则列表"
+  left_rules_title: "左线规则"
+  middle_rules_title: "中线规则"
+  right_rules_title: "右线规则"
+  todo_rules_title: "待办规则"
+  todo_rule_fmt: |
+    代办规则
+    名称:[{}]
+    介绍: {}
+    作者:{} ({})
+    最后编辑时间:{}
+  todo_rule_unauthor: "非规则作者不可更改内容"
+  todo_rule_update: "已更新规则[{}]\n原描述:\n{}"
+  todo_rule_create: "已创建规则[{}]"
+  todo_rule_del: "已删除规则[{}]\n原描述:\n{}"
+  todo_rule_del_empty: "规则[{}]不存在,无法删除"
+  update_start: "开始更新所有规则列表"
+  update_end: "所有规则列表更新完毕"
+  update_fail: "规则列表更新失败"
+
+users:
+  default_bot:
+    id: "2947571390"
+    nickname: "老婆"
+
+system:
+  binary_data: "[二进制数据: {}]"
+  connection_closed: "[连接中断]"
+  connection_error: "[连接错误: {}]"
+  running_error: "[任务执行异常: {}]"
+
+git:
+  start_pull: "开始拉取远程库"
+  branch_error: "错误：无法获取当前分支名"
+  sync_failed: "同步远程失败"
+  no_change: "无内容变更，跳过推送"
+  push_failed: "推送失败，请手动检查"
+  pushed: "规则文件已推送到远端仓库。"
+
+rename:
+  fmt_error: "格式错误： #rename <规则ID> <目标规则ID>"
+  read_failed: "读取规则文件失败: {}"
+  not_found: "未找到规则ID: {}"
+  same: "源规则名和目标规则名相同，无需修改"
+  occupied: "目标规则名 '{}' 已被占用"
+  image_failed: "重命名图片失败: {}"
+  done: "规则已从 [{}] 重命名为 [{}]"
+
+chown:
+  fmt_error: "格式错误： #chown <规则ID> <作者名> [QQ号]"
+  todo_missing: "规则暂存文件不存在，请联系管理员"
+  done: "规则 [{}] 的作者已修改为 {}"
+  done_uid: "规则 [{}] 的作者已修改为 {}(QQ: {})"
+
+forward:
+  output_failed: "终端最终输出发送失败"
+  send_failed: "终端输出发送失败"
+  merge_failed: "合并消息发送失败"
+  search_failed: "搜索结果发送失败, 请尝试使用/p参数"
+  help_send_failed: "帮助发送失败"
+  help_unavailable: "无法加载帮助文件，请稍后再试。"
+
+hint:
+  start_calc: "开始计算提示,使用#查询 {}查询其进度"
+  state_ocr: "正在进行OCR任务"
+  state_calculating: "正在计算提示"
+  board_label: "提示题板[{}]"
+  state_sending: "正在发送{}份图片"
+
+diag:
+  run_command: "run command: {}"
+  exit_code: "exit code: {}"
+  stderr: "stderr: \n\n{}"
+  git_cmd: "命令: {}"
+  git_exit: "退出码: {}"
+  git_stdout: "输出:\n{}"
+  git_stderr: "错误:\n{}"
+  main_new: "主仓库新增提交:"
+  main_none: "主仓库无新增提交"
+  sub_header: "子模块更新详情:"
+  sub_uninit: "  {}: 未初始化，跳过"
+  sub_log: "  {}:"
+  sub_sha_change: "  {}: SHA 变化（无详细日志）"
+  sub_none: "  {}: 无变化"
+  sub_no_change: "  无子模块提交变更"

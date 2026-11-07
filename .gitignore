@@ -7,3 +7,17 @@
 /plugins/MinesVariants/logs/
 /plugins/MinesVariants/rule.tmp
 /plugins/MinesVariants/
+
+# ---- 环境与工具 ----
+.venv/
+.venv_bck/
+.idea/
+__pycache__/
+*.pyc
+
+# ---- 插件运行时产物 ----
+/plugins/MinesVariantsV2/logs/
+/plugins/MinesVariantsV2/__pycache__/
+/plugins/MinesVariantsV2/core/__pycache__/
+/plugins/MinesVariantsV2/i18n/__pycache__/
+/plugins/MinesVariantsV2/fanmade_doc/

@@ -1,0 +1,62 @@
+# MinesVariantsV2 配置
+# 未写出的项会自动使用 core/config.py 里的 DEFAULTS，旧配置可直接运行。
+
+# ---------------- 路径 ----------------
+out_path: 'D:\MinesweeperVariants\output'
+log_path: 'D:\MinesweeperVariants\log'
+image_path: 'D:\MinesweeperVariants\minesweepervariants\impl\rule\image'
+porject_path: 'D:\MinesweeperVariants'   # 历史拼写；如填写 project_path 则优先
+# project_path: 'D:\MinesweeperVariants'
+
+# ---------------- 运行 ----------------
+interval: 0.5            # CPU/内存采样间隔（秒）
+locale: zh_CN            # 界面语言，对应 i18n/<locale>.yaml
+master_uid: 3140864122   # 最高权限 UID，不可被降级
+thread_join_timeout: 1.0 # 关闭任务时等待线程退出的秒数
+
+# ---------------- 任务连接 ----------------
+socket:
+  host: localhost
+  port: 31408
+  recv_size: 4096
+
+# ---------------- 生成任务 ----------------
+mine_runner:
+  max_buffer: 50          # Request 输出缓冲最大行数
+  log_tail_bytes: 4096    # 读取日志尾部字节数
+  error_msg_length: 9     # 失败时最多转发几条
+  error_str_length: 1000  # 每条字符数
+  error_tail_lines: 50    # 终端末尾保留行数
+  simple_threshold: 1000  # "#" 综合指令：小于此值视为生成任务
+
+# ---------------- 合并转发 ----------------
+forward:
+  max_length: 7000        # 单条合并转发最大字符数
+  chunk_max_length: 100   # 单条合并转发最大节点数
+
+# ---------------- 查询 ----------------
+query:
+  log_tail_bytes: 16384   # 读日志尾部字节数
+  default_str_length: 2000
+  max_chunks: 100
+  str_budget: 12000
+  force_stdout_chars: 5000  # #cmd 输出截断字符数
+
+# ---------------- 提示 ----------------
+hint:
+  log_tail_bytes: 4096
+  error_msg_length: 9
+  error_str_length: 1000
+  error_tail_lines: 250
+  download_timeout: 30    # 下载图片超时（秒）
+  download_chunk: 8192
+
+# ---------------- 其它 ----------------
+regex_timeout: 0.2        # 规则正则匹配超时
+update_rules_timeout: 20  # #update 默认超时
+
+# ---------------- DeepSeek ----------------
+deepseek:
+  log_path: 'D:\0.0\lib\my_python\dsBrowser'
+  work_dir: 'D:\0.0\lib\ds-browser'
+  prompt_dir: 'D:\0.0\lib\my_python\dsBrowser\prompt'
